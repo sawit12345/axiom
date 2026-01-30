@@ -17,6 +17,10 @@ on:
         default: '300'
         type: string
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   serve:
     runs-on: ubuntu-latest
@@ -24,6 +28,29 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Setup Git with Your Credentials
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Clone All Your Repos
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        run: |
+          mkdir -p ~/repos
+          cd ~/repos
+          
+          # Get list of all your repos
+          repos=$(curl -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/user/repos?per_page=100&affiliation=owner" \
+            | jq -r '.[].clone_url')
+          
+          # Clone each repo
+          for repo in $repos; do
+            echo "Cloning $repo..."
+            git clone https://$GH_TOKEN@${repo#https://} || true
+          done
 
       # ============================================================
       # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
@@ -192,6 +219,7 @@ jobs:
           echo "------------------------------------------"
           echo "SERVER LIVE AT: ${{ env.URL }}"
           echo "AUTO-SHUTDOWN IN: ${{ github.event.inputs.timeout_minutes }} minute(s)"
+          echo "All your repos available at: ~/repos/"
           echo "------------------------------------------"
           
           START_TIME=$(date +%s)
@@ -278,6 +306,6 @@ jobs:
         with:
           name: opencode-session
           path: /tmp/opencode-save/
-          retention-days: 90
+          retention-days: 30
           overwrite: true
           if-no-files-found: warn
