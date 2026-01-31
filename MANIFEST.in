@@ -1,0 +1,70 @@
+# Copyright 2025 VERSES AI, Inc.
+#
+# Licensed under the VERSES Academic Research License (the "License");
+# you may not use this file except in compliance with the license.
+#
+# You may obtain a copy of the License at
+#
+#     https://github.com/VersesTech/axiom/blob/main/LICENSE
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Include the src/ directory with C++/CUDA source code
+graft src
+
+# Include CMake configuration files
+include CMakeLists.txt
+include src/CMakeLists.txt
+
+# Include all C++ source files
+global-include *.cpp
+
+# Include all CUDA source files
+global-include *.cu
+
+# Include header files
+global-include *.h
+
+# Include CMake modules
+graft cmake
+graft src/cmake
+
+# Include build configuration
+include pyproject.toml
+include setup.py
+
+# Include license and documentation
+include LICENSE
+include README.md
+
+# Exclude the original axiom/ directory from wheels (kept as reference only)
+# Note: This only affects the wheel distribution, not the source distribution
+# The axiom/ directory can still be in the source tarball for reference
+prune axiom/__pycache__
+prune axiom/vi/__pycache__
+
+# Exclude build artifacts
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+global-exclude *.pyd
+global-exclude __pycache__
+global-exclude .git*
+global-exclude .DS_Store
+
+# Exclude IDE files
+global-exclude .vscode
+global-exclude .idea
+global-exclude *.swp
+
+# Exclude test build directories
+prune build
+test build_temp
+prune dist
+prune *.egg-info
