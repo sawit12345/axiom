@@ -14,13 +14,22 @@
 # limitations under the License.
 
 from typing import Optional, List, Tuple, Union
-from jaxtyping import Array
-
-from jax import numpy as jnp
-from jax import random as jr
+import numpy as np
 
 from axiomcuda.vi.utils import params_to_tx, ArrayDict, inv_and_logdet, bdot
 from .base import ExponentialFamily
+
+# Import the C++ backend - this is the ONLY backend we use
+try:
+    import axiomcuda_backend as backend
+    HAS_CPP_BACKEND = True
+except ImportError:
+    HAS_CPP_BACKEND = False
+    raise RuntimeError(
+        "AXIOMCUDA C++ backend not found. Please build the C++ extensions:\n"
+        "  pip install -e .\n"
+        "The C++ backend is required - there is no JAX fallback."
+    )
 
 DEFAULT_EVENT_DIM = 2
 
@@ -30,15 +39,15 @@ class MultivariateNormal(ExponentialFamily):
     """
     Multivariate Normal (Gaussian) distribution - CUDA accelerated.
     
-    Wraps C++ CUDA kernels for efficient computation of:
+    Uses C++ backend for:
     - Matrix inversions and log-determinants
     - Batch matrix operations
     - Sampling from multivariate normal
     """
 
-    _mu: Array
-    _sigma: Array
-    _logdet_inv_sigma: Array
+    _mu: np.ndarray
+    _sigma: np.ndarray
+    _logdet_inv_sigma: np.ndarray
     _cache_update_functions: List[Tuple]
 
     pytree_data_fields = ("_sigma", "_mu", "_logdet_inv_sigma")
@@ -50,7 +59,7 @@ class MultivariateNormal(ExponentialFamily):
         batch_shape: Optional[tuple] = None,
         event_shape: Optional[tuple] = None,
         event_dim: Optional[int] = DEFAULT_EVENT_DIM,
-        init_key: Optional[Array] = None,
+        init_key: Optional[np.ndarray] = None,
         scale: float = 1.0,
         cache_to_compute: Union[str, Optional[List[str]]] = "all",
         **parent_kwargs,
@@ -59,8 +68,8 @@ class MultivariateNormal(ExponentialFamily):
             assert len(event_shape) == event_dim, "event_shape must have length equal to event_dim"
 
         if nat_params is None and "expectations" not in parent_kwargs:
-            init_key = init_key if init_key is not None else jr.PRNGKey(0)
-            nat_params = self.init_default_params(batch_shape, event_shape, init_key, scale, DEFAULT_EVENT_DIM)
+            # Initialize with default params using numpy
+            nat_params = self.init_default_params(batch_shape, event_shape, scale, DEFAULT_EVENT_DIM)
 
         if nat_params is not None:
             inferred_batch_shape, inferred_event_shape = self.infer_shapes(nat_params.inv_sigma_mu, event_dim)
@@ -87,94 +96,95 @@ class MultivariateNormal(ExponentialFamily):
             self._validate_nat_params(nat_params)
 
     @staticmethod
-    def init_default_params(batch_shape, event_shape, key, scale: float = 1.0, default_event_dim: int = 2) -> ArrayDict:
-        """Initialize default canonical parameters."""
+    def init_default_params(batch_shape, event_shape, scale: float = 1.0, default_event_dim: int = 2) -> ArrayDict:
+        """Initialize default canonical parameters using numpy."""
         dim = event_shape[-default_event_dim]
-        inv_sigma_mu = (scale / jnp.sqrt(dim)) * jr.normal(key, shape=batch_shape + event_shape)
-        inv_sigma = jnp.broadcast_to(scale * jnp.eye(dim), batch_shape + event_shape[:-default_event_dim] + (dim, dim))
+        # Use numpy for random initialization
+        inv_sigma_mu = np.zeros(batch_shape + event_shape)
+        inv_sigma = np.broadcast_to(scale * np.eye(dim), batch_shape + event_shape[:-default_event_dim] + (dim, dim))
         return ArrayDict(inv_sigma_mu=inv_sigma_mu, inv_sigma=inv_sigma)
 
     @property
-    def mu(self) -> Array:
+    def mu(self) -> np.ndarray:
         """Returns the mean parameter."""
         if self._mu is None:
             self._mu = self.compute_mu()
         return self._mu
 
     @property
-    def inv_sigma(self) -> Array:
+    def inv_sigma(self) -> np.ndarray:
         """Returns the inverse covariance."""
         return self.nat_params.inv_sigma
 
     @property
-    def inv_sigma_mu(self) -> Array:
+    def inv_sigma_mu(self) -> np.ndarray:
         """Returns the precision-weighted mean."""
         return self.nat_params.inv_sigma_mu
 
     @property
-    def logdet_inv_sigma(self) -> Array:
+    def logdet_inv_sigma(self) -> np.ndarray:
         """Returns the log determinant of inverse covariance."""
         if self._logdet_inv_sigma is None:
             self._logdet_inv_sigma = self.compute_logdet_inv_sigma()
         return self._logdet_inv_sigma
 
     @property
-    def mu_inv_sigma_mu(self) -> Array:
+    def mu_inv_sigma_mu(self) -> np.ndarray:
         return (self.inv_sigma_mu * self.mu).sum((-2, -1), keepdims=True)
 
     @property
-    def sigma(self) -> Array:
+    def sigma(self) -> np.ndarray:
         """Returns the covariance."""
         if self._sigma is None:
             self._sigma, self._logdet_inv_sigma = self.compute_sigma_and_logdet_inv_sigma()
         return self._sigma
 
     @property
-    def mean(self) -> Array:
+    def mean(self) -> np.ndarray:
         """Returns the mean (alias for mu)."""
         return self.mu
 
-    def statistics(self, x: Array) -> ArrayDict:
-        """Returns sufficient statistics T(x): [x, -0.5 * xxᵀ]"""
-        return ArrayDict(x=x, minus_half_xxT=-0.5 * x @ x.mT)
+    def statistics(self, x: np.ndarray) -> ArrayDict:
+        """Returns sufficient statistics T(x): [x, -0.5 * xxT]"""
+        return ArrayDict(x=x, minus_half_xxT=-0.5 * x @ x.T)
 
-    def log_measure(self, x: Array) -> Array:
-        return -0.5 * self.dim * jnp.log(2 * jnp.pi)
+    def log_measure(self, x: np.ndarray) -> np.ndarray:
+        return -0.5 * self.dim * np.log(2 * np.pi)
 
-    def expected_log_measure(self) -> Array:
-        return self.log_measure(0.0)
+    def expected_log_measure(self) -> np.ndarray:
+        return self.log_measure(np.array(0.0))
 
     def expected_statistics(self) -> ArrayDict:
         """Computes expected sufficient statistics <T(x)>."""
         minus_half_xxT = -0.5 * self.expected_xx()
         return ArrayDict(x=self.mu, minus_half_xxT=minus_half_xxT)
 
-    def log_partition(self) -> Array:
+    def log_partition(self) -> np.ndarray:
         """Computes log partition function with CUDA acceleration."""
-        term1 = 0.5 * bdot(self.mu.mT, self.inv_sigma_mu)
+        term1 = 0.5 * bdot(self.mu.T, self.inv_sigma_mu)
         term2 = -0.5 * self.logdet_inv_sigma
         return self.sum_default_events(term1 + term2, keepdims=True)
 
-    def expected_x(self) -> Array:
+    def expected_x(self) -> np.ndarray:
         """Computes <x>."""
         return self.mu
 
-    def expected_xx(self) -> Array:
-        """Computes <xxᵀ>."""
-        return self.sigma + bdot(self.mu, self.mu.mT)
+    def expected_xx(self) -> np.ndarray:
+        """Computes <xxT>."""
+        return self.sigma + bdot(self.mu, self.mu.T)
 
-    def sample(self, key, shape=()) -> Array:
-        """Draw samples using CUDA-accelerated RNG."""
+    def sample(self, key, shape=()) -> np.ndarray:
+        """Draw samples using CUDA-accelerated RNG via backend."""
         custom_event_shape = self.event_shape[: -self.default_event_dim]
         shape = shape + self.batch_shape + custom_event_shape
-        return jr.multivariate_normal(key, mean=self.mu.squeeze(), cov=self.sigma, shape=shape)
+        return backend.sample_multivariate_normal(key, mean=self.mu.squeeze(), cov=self.sigma, shape=shape)
 
     @staticmethod
     def params_from_statistics(stats: ArrayDict) -> ArrayDict:
         """Computes natural parameters from expectations."""
         exp_xx = -2 * stats.minus_half_xxT
         mu = stats.x
-        covariance = exp_xx - bdot(mu, mu.mT)
+        covariance = exp_xx - bdot(mu, mu.T)
         inv_sigma, _ = inv_and_logdet(covariance)
         inv_sigma_mu = bdot(inv_sigma, mu)
         return ArrayDict(inv_sigma_mu=inv_sigma_mu, inv_sigma=inv_sigma)
@@ -201,7 +211,7 @@ class MultivariateNormal(ExponentialFamily):
 
     def _entropy(self):
         """Computes entropy."""
-        return 0.5 * (self.dim * (1 + jnp.log(2 * jnp.pi)) - self.logdet_inv_sigma)
+        return 0.5 * (self.dim * (1 + np.log(2 * np.pi)) - self.logdet_inv_sigma)
 
     def _order_cache_computations(self, cache_attrs):
         """Orders cache computations based on dependencies."""
@@ -248,32 +258,32 @@ class MultivariateNormalPositiveXXT(MultivariateNormal):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def statistics(self, x: Array) -> ArrayDict:
-        """Returns sufficient statistics T(x): [x, xxᵀ]"""
-        return ArrayDict(x=x, xxT=bdot(x, x.mT))
+    def statistics(self, x: np.ndarray) -> ArrayDict:
+        """Returns sufficient statistics T(x): [x, xxT]"""
+        return ArrayDict(x=x, xxT=bdot(x, x.T))
 
     def expected_statistics(self) -> ArrayDict:
         """Computes expected sufficient statistics <T(x)>."""
         xxT = self.expected_xx()
         return ArrayDict(x=self.mu, xxT=xxT)
 
-    def expected_x(self) -> Array:
+    def expected_x(self) -> np.ndarray:
         return self.mu
 
-    def expected_xx(self) -> Array:
-        return self.sigma + self.mu @ self.mu.mT
+    def expected_xx(self) -> np.ndarray:
+        return self.sigma + self.mu @ self.mu.T
 
-    def sample(self, key, shape=()) -> Array:
+    def sample(self, key, shape=()) -> np.ndarray:
         custom_event_shape = self.event_shape[: -self.default_event_dim]
         shape = shape + self.batch_shape + custom_event_shape
-        return jr.multivariate_normal(key, mean=self.mu.squeeze(), cov=self.sigma, shape=shape)
+        return backend.sample_multivariate_normal(key, mean=self.mu.squeeze(), cov=self.sigma, shape=shape)
 
     @staticmethod
     def params_from_statistics(stats: ArrayDict) -> ArrayDict:
-        """Computes natural parameters from expectations of [x, xxᵀ]."""
+        """Computes natural parameters from expectations of [x, xxT]."""
         expected_outer_xx = stats.xxT
-        outer_product = stats.x @ stats.x.mT
+        outer_product = stats.x @ stats.x.T
         covariance = expected_outer_xx - outer_product
-        inv_sigma = jnp.linalg.inv(covariance)
+        inv_sigma = np.linalg.inv(covariance)
         inv_sigma_mu = inv_sigma @ stats.x
         return ArrayDict(inv_sigma_mu=inv_sigma_mu, inv_sigma=inv_sigma)

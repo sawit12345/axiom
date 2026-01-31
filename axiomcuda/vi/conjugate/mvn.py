@@ -14,13 +14,8 @@
 # limitations under the License.
 
 from typing import Optional
-from jaxtyping import Array
-
-import jax
-from jax import numpy as jnp
-from jax import random as jr
-from jax import tree_util as jtu
-from jaxtyping import Array
+import numpy as np
+from scipy.special import digamma
 
 from ..distribution import Distribution
 from ..exponential import MultivariateNormal as MultivariateNormalLikelihood
@@ -31,25 +26,20 @@ from ..utils import inv_and_logdet, bdot
 DEFAULT_EVENT_DIM = 2
 
 
-@jax.jit
-def clip_small_values(x):
-    return jnp.where((-1e-3 < x) & (x < 1e-3), 0.0, x)
-
-
 @params_to_tx({"eta_1": "x", "eta_2": "minus_half_xxT"})
 class MultivariateNormal(Conjugate):
     """
     Normal-Inverse-Wishart conjugate prior - CUDA accelerated.
     
-    Wraps C++ CUDA kernels for:
+    Uses C++ backend for:
     - Matrix operations (inverse, logdet)
     - Multivariate gamma and digamma functions
     - Posterior parameter updates
     """
 
-    _u: Array
-    _logdet_inv_u: Array
-    _prior_logdet_inv_u: Array
+    _u: np.ndarray
+    _logdet_inv_u: np.ndarray
+    _prior_logdet_inv_u: np.ndarray
 
     pytree_data_fields = ("_u", "_logdet_inv_u", "_prior_logdet_inv_u")
     pytree_aux_fields = ("fixed_precision",)
@@ -64,7 +54,7 @@ class MultivariateNormal(Conjugate):
         fixed_precision: bool = False,
         scale: float = 1.0,
         dof_offset: float = 0.0,
-        init_key: Optional[Array] = None,
+        init_key: Optional[np.ndarray] = None,
     ):
         if event_shape is not None:
             assert len(event_shape) == event_dim, "event_shape must have length equal to event_dim"
@@ -73,11 +63,11 @@ class MultivariateNormal(Conjugate):
             assert dof_offset >= 0.0, "dof_offset must be non-negative"
             prior_params = self.init_default_params(batch_shape, event_shape, scale, dof_offset, DEFAULT_EVENT_DIM)
         if params is None:
-            init_key = jr.PRNGKey(0) if init_key is None else init_key
+            # Initialize params with slight random perturbation from prior
             params = {}
             for k, v in prior_params.items():
                 if k == "mean":
-                    params[k] = v + jr.normal(init_key, v.shape)
+                    params[k] = v + np.random.normal(0, 0.1, v.shape)
                 else:
                     params[k] = v
             params = ArrayDict(**params)
@@ -97,30 +87,30 @@ class MultivariateNormal(Conjugate):
             event_shape,
         )
 
-        _prior_logdet_inv_u = jnp.linalg.slogdet(self.prior_inv_u)[1]
+        _prior_logdet_inv_u = np.linalg.slogdet(self.prior_inv_u)[1]
         self._prior_logdet_inv_u = self.expand_default_event_dims(_prior_logdet_inv_u)
 
     @staticmethod
     def init_default_params(batch_shape, event_shape, scale: float = 1.0, dof_offset: float = 0.0, default_event_dim=2):
         """Initialize default canonical parameters."""
         dim = event_shape[-default_event_dim]
-        mean = jnp.zeros(batch_shape + event_shape)
-        kappa = jnp.full(batch_shape + event_shape[:-default_event_dim] + (1, 1), 1.0)
-        u = (scale**2) * jnp.broadcast_to(
-            jnp.eye(dim),
+        mean = np.zeros(batch_shape + event_shape)
+        kappa = np.full(batch_shape + event_shape[:-default_event_dim] + (1, 1), 1.0)
+        u = (scale**2) * np.broadcast_to(
+            np.eye(dim),
             batch_shape + event_shape[:-default_event_dim] + (dim, dim),
         )
-        n = jnp.full(batch_shape + event_shape[:-default_event_dim] + (1, 1), 1.0 + dim + dof_offset)
+        n = np.full(batch_shape + event_shape[:-default_event_dim] + (1, 1), 1.0 + dim + dof_offset)
         return ArrayDict(mean=mean, kappa=kappa, u=u, n=n)
 
     @property
-    def sqrt_diag_norm(self) -> jnp.ndarray:
-        diag = jnp.diagonal(jnp.abs(self.posterior_params.eta.eta_2), axis1=-2, axis2=-1)
-        diag = jnp.maximum(diag, 1.0)
-        return jnp.sqrt(diag)
+    def sqrt_diag_norm(self) -> np.ndarray:
+        diag = np.diagonal(np.abs(self.posterior_params.eta.eta_2), axis1=-2, axis2=-1)
+        diag = np.maximum(diag, 1.0)
+        return np.sqrt(diag)
 
     @property
-    def norm(self) -> jnp.ndarray:
+    def norm(self) -> np.ndarray:
         sqrt_diag = self.sqrt_diag_norm
         norm = bdot(sqrt_diag[..., :, None], sqrt_diag[..., None, :])
         return norm
@@ -159,10 +149,12 @@ class MultivariateNormal(Conjugate):
         scaled_eta_2 = self.posterior_params.eta.eta_2 / norm
         kappa = self.posterior_params.nu.nu_1
         scaled_eta_1 = self.posterior_params.eta.eta_1 / sqrt_diag_norm[..., None]
-        scaled_inv_u = -2 * scaled_eta_2 - (1.0 / kappa) * bdot(scaled_eta_1, scaled_eta_1.mT)
-        clipped_diag = jnp.diagonal(scaled_inv_u, axis1=-2, axis2=-1).clip(min=1e-3)
-        scaled_inv_u = scaled_inv_u.at[..., jnp.arange(self.dim), jnp.arange(self.dim)].set(clipped_diag)
-        return clip_small_values(scaled_inv_u)
+        scaled_inv_u = -2 * scaled_eta_2 - (1.0 / kappa) * bdot(scaled_eta_1, scaled_eta_1.T)
+        clipped_diag = np.diagonal(scaled_inv_u, axis1=-2, axis2=-1).clip(min=1e-3)
+        # Clip diagonal
+        for i in range(scaled_inv_u.shape[-1]):
+            scaled_inv_u[..., i, i] = clipped_diag[..., i]
+        return scaled_inv_u
 
     @property
     def inv_u(self):
@@ -174,7 +166,7 @@ class MultivariateNormal(Conjugate):
     @property
     def prior_inv_u(self):
         return -2 * self.prior_params.eta.eta_2 - (1.0 / self.prior_params.nu.nu_1) * bdot(
-            self.prior_params.eta.eta_1, self.prior_params.eta.eta_1.mT
+            self.prior_params.eta.eta_1, self.prior_params.eta.eta_1.T
         )
 
     @property
@@ -185,16 +177,16 @@ class MultivariateNormal(Conjugate):
             else:
                 _scaled_u, _logdet_inv_u_scaled = inv_and_logdet(self._scaled_inv_u)
                 self._u = _scaled_u / self.norm
-                log_diag = jnp.log(jnp.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
-                self._logdet_inv_u = _logdet_inv_u_scaled + jnp.expand_dims(log_diag, (-1, -2))
+                log_diag = np.log(np.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
+                self._logdet_inv_u = _logdet_inv_u_scaled + np.expand_dims(log_diag, (-1, -2))
         return self._u
 
     @property
     def logdet_inv_u(self):
         if self._logdet_inv_u is None:
             _logdet_inv_u_scaled = inv_and_logdet(self._scaled_inv_u, return_inverse=False)
-            log_diag = jnp.log(jnp.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
-            self._logdet_inv_u = _logdet_inv_u_scaled + jnp.expand_dims(log_diag, (-1, -2))
+            log_diag = np.log(np.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
+            self._logdet_inv_u = _logdet_inv_u_scaled + np.expand_dims(log_diag, (-1, -2))
         return self._logdet_inv_u
 
     @property
@@ -206,7 +198,7 @@ class MultivariateNormal(Conjugate):
     def to_natural_params(self, params: ArrayDict) -> ArrayDict:
         """Converts canonical parameters to natural parameters."""
         eta_1 = params.mean * params.kappa
-        eta_2 = -0.5 * (inv_and_logdet(params.u, return_logdet=False) + bdot(eta_1, params.mean.mT))
+        eta_2 = -0.5 * (inv_and_logdet(params.u, return_logdet=False) + bdot(eta_1, params.mean.T))
         nu_1 = params.kappa
         nu_2 = params.n - self.dim
         eta = ArrayDict(eta_1=eta_1, eta_2=eta_2)
@@ -222,47 +214,47 @@ class MultivariateNormal(Conjugate):
     def expected_posterior_statistics(self) -> ArrayDict:
         """Computes expected sufficient statistics."""
         eta_stats = self.expected_likelihood_params()
-        nu_stats = jtu.tree_map(lambda x: -x, self.expected_log_partition())
+        nu_stats = ArrayDict(nu_1=-self.expected_log_partition().nu_1, nu_2=-self.expected_log_partition().nu_2)
         return ArrayDict(eta=eta_stats, nu=nu_stats)
 
-    def expected_log_partition(self) -> Array:
+    def expected_log_partition(self) -> ArrayDict:
         """Computes expected log partition <A(θ)>."""
         nu1_term = 0.5 * self.expected_mu_inv_sigma_mu()
         nu2_term = -0.5 * self.expected_logdet_inv_sigma()
         return ArrayDict(nu_1=nu1_term, nu_2=nu2_term)
 
-    def log_prior_partition(self) -> Array:
+    def log_prior_partition(self) -> np.ndarray:
         """Computes log partition of prior."""
         return self._log_partition(self.prior_kappa, self.prior_n, self.prior_logdet_inv_u)
 
-    def log_posterior_partition(self) -> Array:
+    def log_posterior_partition(self) -> np.ndarray:
         """Computes log partition of posterior."""
         return self._log_partition(self.kappa, self.n, self.logdet_inv_u)
 
-    def _log_partition(self, kappa: Array, n: Array, logdet_inv_u: Array) -> Array:
+    def _log_partition(self, kappa: np.ndarray, n: np.ndarray, logdet_inv_u: np.ndarray) -> np.ndarray:
         half_dim = 0.5 * self.dim
-        term_1 = -half_dim * jnp.log(kappa)
+        term_1 = -half_dim * np.log(kappa)
         term_2 = -0.5 * n * logdet_inv_u
-        term_3 = half_dim * (jnp.log(2 * jnp.pi) + n * jnp.log(2))
+        term_3 = half_dim * (np.log(2 * np.pi) + n * np.log(2))
         term_4 = mvgammaln(n / 2.0, self.dim)
         return term_1 + term_2 + term_3 + term_4
 
-    def expected_logdet_inv_sigma(self) -> Array:
-        return self.dim * jnp.log(2) - self.logdet_inv_u + mvdigamma(self.n / 2.0, self.dim)
+    def expected_logdet_inv_sigma(self) -> np.ndarray:
+        return self.dim * np.log(2) - self.logdet_inv_u + mvdigamma(self.n / 2.0, self.dim)
 
     def logdet_expected_inv_sigma(self):
-        return -self.logdet_inv_u + self.dim * jnp.log(self.n)
+        return -self.logdet_inv_u + self.dim * np.log(self.n)
 
     def variational_residual(self):
         return 0.5 * (
-            self.dim * (jnp.log(2) - jnp.log(self.n) - 1.0 / self.kappa)
+            self.dim * (np.log(2) - np.log(self.n) - 1.0 / self.kappa)
             + mvdigamma(self.n / 2.0, self.dim)
         ).squeeze((-2, -1))
 
     def collapsed_residual(self):
         return self.variational_residual()
 
-    def update_from_probabilities(self, pX: Distribution, weights: Optional[Array] = None, **kwargs):
+    def update_from_probabilities(self, pX: Distribution, weights: Optional[np.ndarray] = None, **kwargs):
         """Update parameters given expected sufficient statistics."""
         sample_shape = pX.shape[: -self.event_dim - self.batch_dim]
         sample_dims = tuple(range(len(sample_shape)))
@@ -270,7 +262,7 @@ class MultivariateNormal(Conjugate):
         if weights is None:
             SEx = pX.expected_x().sum(sample_dims)
             SExx = pX.expected_xx().sum(sample_dims)
-            N = jnp.broadcast_to(jnp.prod(jnp.array(sample_shape)), SEx.shape[:-2] + (1, 1))
+            N = np.broadcast_to(np.prod(np.array(sample_shape)), SEx.shape[:-2] + (1, 1))
         else:
             weights = self.expand_event_dims(weights)
             SEx = (weights * pX.expected_x()).sum(sample_dims)
@@ -285,28 +277,28 @@ class MultivariateNormal(Conjugate):
         beta = kwargs.get("beta", 0.0)
         self.update_from_statistics(summed_stats, lr=lr, beta=beta)
 
-    def expected_inv_sigma(self) -> Array:
+    def expected_inv_sigma(self) -> np.ndarray:
         """Compute expected inverse covariance E[Σ⁻¹] = nU."""
         return self.u * self.n
 
-    def expected_inv_sigma_mu(self) -> Array:
+    def expected_inv_sigma_mu(self) -> np.ndarray:
         """Compute E[Σ⁻¹μ] = κUM."""
         return bdot(self.expected_inv_sigma(), self.mean)
 
-    def expected_sigma(self) -> Array:
+    def expected_sigma(self) -> np.ndarray:
         """Compute expected covariance E[Σ] = U⁻¹/(n-d-1)."""
         return self.inv_u / (self.n - self.dim - 1)
 
-    def inv_expected_inv_sigma(self) -> Array:
+    def inv_expected_inv_sigma(self) -> np.ndarray:
         return self.inv_u / self.n
 
-    def expected_mu_inv_sigma_mu(self) -> Array:
+    def expected_mu_inv_sigma_mu(self) -> np.ndarray:
         """Compute E[μᵀΣ⁻¹μ]."""
-        return bdot(self.mean.mT, bdot(self.expected_inv_sigma(), self.mean)) + self.dim / self.kappa
+        return bdot(self.mean.T, bdot(self.expected_inv_sigma(), self.mean)) + self.dim / self.kappa
 
-    def expected_xx(self) -> Array:
-        """Compute E[xxᵀ] = Σ + μμᵀ."""
-        return self.expected_sigma() + bdot(self.mean, self.mean.mT)
+    def expected_xx(self) -> np.ndarray:
+        """Compute E[xxT] = Σ + μμT."""
+        return self.expected_sigma() + bdot(self.mean, self.mean.T)
 
     def _update_cache(self):
         """Update scale matrix and logdet."""
@@ -316,18 +308,18 @@ class MultivariateNormal(Conjugate):
             norm = self.norm
             _scaled_u, _logdet_inv_u_scaled = inv_and_logdet(self._scaled_inv_u)
             self._u = _scaled_u / norm
-            log_diag = jnp.log(jnp.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
-            self._logdet_inv_u = _logdet_inv_u_scaled + jnp.expand_dims(log_diag, (-1, -2))
+            log_diag = np.log(np.diagonal(self.norm, axis1=-1, axis2=-2)).sum(axis=-1)
+            self._logdet_inv_u = _logdet_inv_u_scaled + np.expand_dims(log_diag, (-1, -2))
 
-    def _kl_divergence(self) -> Array:
+    def _kl_divergence(self) -> np.ndarray:
         """Computes KL divergence between prior and posterior."""
-        kl = 0.5 * (self.prior_kappa / self.kappa - 1 + jnp.log(self.kappa / self.prior_kappa)) * self.dim
+        kl = 0.5 * (self.prior_kappa / self.kappa - 1 + np.log(self.kappa / self.prior_kappa)) * self.dim
         pred_error = self.mean - self.prior_mean
-        kl = kl + 0.5 * self.prior_kappa * bdot(pred_error.mT, bdot(self.expected_inv_sigma(), pred_error))
+        kl = kl + 0.5 * self.prior_kappa * bdot(pred_error.T, bdot(self.expected_inv_sigma(), pred_error))
         kl = kl + self.kl_divergence_wishart()
         return self.sum_events(kl)
 
-    def kl_divergence_wishart(self) -> Array:
+    def kl_divergence_wishart(self) -> np.ndarray:
         """Compute KL divergence between posterior and prior Wishart."""
         kl = self.prior_n / 2.0 * (self.logdet_inv_u - self.prior_logdet_inv_u)
         kl = kl + self.n / 2.0 * (self.prior_inv_u * self.u).sum((-2, -1), keepdims=True)
@@ -336,29 +328,29 @@ class MultivariateNormal(Conjugate):
         kl = kl + (self.n - self.prior_n) / 2.0 * mvdigamma(self.n / 2.0, self.dim)
         return kl
 
-    def _expected_log_likelihood(self, x: Array) -> Array:
+    def _expected_log_likelihood(self, x: np.ndarray) -> np.ndarray:
         """Computes expected log likelihood."""
         diff = x - self.mean
-        tx_dot_stheta = -0.5 * bdot(diff.mT, bdot(self.expected_inv_sigma(), diff))
+        tx_dot_stheta = -0.5 * bdot(diff.T, bdot(self.expected_inv_sigma(), diff))
         atheta_1 = -0.5 * self.dim / self.kappa
         atheta_2 = 0.5 * self.expected_logdet_inv_sigma()
-        log_base_measure = -0.5 * self.dim * jnp.log(2 * jnp.pi)
+        log_base_measure = -0.5 * self.dim * np.log(2 * np.pi)
         negative_expected_atheta = atheta_1 + atheta_2
         return self.sum_events(log_base_measure + tx_dot_stheta + negative_expected_atheta)
 
-    def expected_log_likelihood(self, data: Array) -> Array:
+    def expected_log_likelihood(self, data: np.ndarray) -> np.ndarray:
         return self._expected_log_likelihood(data)
 
     def average_energy(self, x: Distribution):
         """Computes average energy term."""
         expected_x = x.expected_x()
         expected_xx = x.expected_xx()
-        sigma = expected_xx - bdot(expected_x, expected_x.mT)
+        sigma = expected_xx - bdot(expected_x, expected_x.T)
         diff = expected_x - self.mean
         exp_inv_sigma = self.expected_inv_sigma()
-        energy = -0.5 * jnp.sum(exp_inv_sigma * sigma, (-2, -1), keepdims=True)
-        energy -= 0.5 * bdot(diff.mT, bdot(exp_inv_sigma, diff))
+        energy = -0.5 * np.sum(exp_inv_sigma * sigma, (-2, -1), keepdims=True)
+        energy -= 0.5 * bdot(diff.T, bdot(exp_inv_sigma, diff))
         energy -= 0.5 * self.dim / self.kappa
         energy += 0.5 * self.expected_logdet_inv_sigma()
-        energy -= 0.5 * self.dim * jnp.log(2 * jnp.pi)
+        energy -= 0.5 * self.dim * np.log(2 * np.pi)
         return self.sum_events(energy)

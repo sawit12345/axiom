@@ -13,21 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+PyTree utilities - pure Python implementation without JAX.
+
+NO JAX - uses only numpy.
+"""
+
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-import jax.numpy as jnp
-import jax.tree_util as jtu
-from jaxtyping import Array, ArrayLike, Bool, Float, PyTree, PyTreeDef
-from typing import Tuple
-from jax.tree_util import register_pytree_node_class
+from typing import Any, Optional, Union
 import numpy as np
-import jax
 
 
-@register_pytree_node_class
 class ArrayDict:
-    """Immutable dictionary-like PyTree node for array storage."""
+    """Dictionary-like container for array storage - immutable."""
     
     def __new__(cls, **kwargs):
         instance = super().__new__(cls)
@@ -67,38 +65,89 @@ class ArrayDict:
         fields = ", ".join(f"{name}={getattr(self, name)!r}" for name in self._fields)
         return f"{self.__class__.__name__}({fields})"
 
-    def tree_flatten(self):
-        values = []
-        keys = []
-        for key, value in sorted(self._fields.items()):
-            values.append(value)
-            keys.append(key)
-        return values, keys
+    def __iter__(self):
+        return iter(self._fields.items())
 
-    @classmethod
-    def tree_unflatten(cls, keys, values):
-        return cls(**dict(zip(keys, values)))
+    def __contains__(self, key):
+        return key in self._fields
+
+    def __len__(self):
+        return len(self._fields)
 
 
-def size(array_dict: PyTree) -> int:
+def size(array_dict) -> int:
     """Count total size of arrays in PyTree."""
     total_size = 0
-    for param in jtu.tree_leaves(array_dict):
-        if isinstance(param, jnp.ndarray):
+    for param in tree_leaves(array_dict):
+        if isinstance(param, np.ndarray):
             total_size = total_size + param.size
     return total_size
 
 
+def tree_leaves(tree):
+    """Flatten tree into list of leaves."""
+    leaves = []
+    
+    def collect_leaves(node):
+        if isinstance(node, (np.ndarray, int, float, str, bool, type(None))):
+            leaves.append(node)
+        elif isinstance(node, ArrayDict):
+            for v in node.values():
+                collect_leaves(v)
+        elif isinstance(node, dict):
+            for v in node.values():
+                collect_leaves(v)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                collect_leaves(item)
+        else:
+            leaves.append(node)
+    
+    collect_leaves(tree)
+    return leaves
+
+
+def tree_map(fn, tree, is_leaf=None):
+    """Map function over tree."""
+    def map_node(node):
+        if is_leaf is not None and is_leaf(node):
+            return fn(node)
+        elif isinstance(node, (np.ndarray, int, float, str, bool, type(None))):
+            return fn(node)
+        elif isinstance(node, ArrayDict):
+            return ArrayDict(**{k: map_node(v) for k, v in node.items()})
+        elif isinstance(node, dict):
+            return {k: map_node(v) for k, v in node.items()}
+        elif isinstance(node, (list, tuple)):
+            mapped = [map_node(item) for item in node]
+            return type(node)(mapped)
+        else:
+            return fn(node)
+    
+    return map_node(tree)
+
+
 def sum_pytrees(*pytrees):
     """Sum multiple PyTrees element-wise."""
-    return jtu.tree_map(lambda *args: sum(args), *pytrees)
+    def sum_fn(*args):
+        result = args[0]
+        for arg in args[1:]:
+            if result is None:
+                result = arg
+            elif arg is None:
+                pass
+            else:
+                result = result + arg
+        return result
+    
+    return tree_map(sum_fn, pytrees[0])
 
 
-def zeros_like(array_dict: ArrayDict) -> ArrayDict:
+def zeros_like(array_dict) -> ArrayDict:
     """Create ArrayDict with zeros matching input structure."""
     def zeros_for_value(value):
-        if isinstance(value, jnp.ndarray):
-            return jnp.zeros(value.shape, value.dtype)
+        if isinstance(value, np.ndarray):
+            return np.zeros(value.shape, value.dtype)
         elif isinstance(value, ArrayDict):
             return zeros_like(value)
         elif isinstance(value, dict):
@@ -109,16 +158,18 @@ def zeros_like(array_dict: ArrayDict) -> ArrayDict:
     return ArrayDict(**{key: zeros_for_value(val) for key, val in array_dict.items()})
 
 
-def tree_copy(tree: PyTree) -> PyTree:
+def tree_copy(tree):
     """Copy a PyTree (re-references leaves)."""
     def copy(x):
+        if isinstance(x, np.ndarray):
+            return x.copy()
         return x
-    return jtu.tree_map(copy, tree)
+    return tree_map(copy, tree)
 
 
-def apply_add(dist: PyTree, updates: PyTree) -> PyTree:
+def apply_add(dist, updates):
     """Tree-map broadcasted addition handling None leaves."""
-    def _apply_add(u, p):
+    def _apply_add(p, u):
         if u is None:
             return p
         else:
@@ -127,10 +178,10 @@ def apply_add(dist: PyTree, updates: PyTree) -> PyTree:
     def _is_none(x):
         return x is None
 
-    return jtu.tree_map(_apply_add, updates, dist, is_leaf=_is_none)
+    return tree_map(lambda x, y: _apply_add(y, x), updates, is_leaf=_is_none)
 
 
-def apply_scale(dist: PyTree, scale=1.0) -> PyTree:
+def apply_scale(dist, scale=1.0):
     """Tree-map broadcasted scale handling None leaves."""
     def _apply_scale(leaf):
         if leaf is None:
@@ -141,10 +192,10 @@ def apply_scale(dist: PyTree, scale=1.0) -> PyTree:
     def _is_none(x):
         return x is None
 
-    return jtu.tree_map(_apply_scale, dist, is_leaf=_is_none)
+    return tree_map(_apply_scale, dist, is_leaf=_is_none)
 
 
-def tree_marginalize(dist: PyTree, weights: Array, dims: Tuple[int], keepdims=False) -> PyTree:
+def tree_marginalize(dist, weights: np.ndarray, dims: tuple, keepdims=False):
     """Marginalize PyTree over specified dimensions."""
     def apply_marginalization(leaf, reduce_dims=False):
         if leaf is None:
@@ -155,7 +206,7 @@ def tree_marginalize(dist: PyTree, weights: Array, dims: Tuple[int], keepdims=Fa
     def _is_none(x):
         return x is None
 
-    return jtu.tree_map(lambda x: apply_marginalization(x, reduce_dims=keepdims), dist, is_leaf=_is_none)
+    return tree_map(lambda x: apply_marginalization(x, reduce_dims=keepdims), dist, is_leaf=_is_none)
 
 
 def map_and_multiply(a: ArrayDict, b: ArrayDict, sum_dim: int, mapping: dict = None):
@@ -166,10 +217,17 @@ def map_and_multiply(a: ArrayDict, b: ArrayDict, sum_dim: int, mapping: dict = N
         mapped_b = b
 
     def multiply_and_sum(x, y):
-        return jnp.sum(x * y, axis=range(-sum_dim, 0), keepdims=True)
+        return np.sum(x * y, axis=tuple(range(-sum_dim, 0)), keepdims=True)
 
-    result = jtu.tree_map(multiply_and_sum, a, mapped_b)
-    return jtu.tree_reduce(lambda x, y: x + y, result)
+    result = tree_map(multiply_and_sum, a, mapped_b)
+    
+    # Sum all elements
+    leaves = tree_leaves(result)
+    total = 0
+    for leaf in leaves:
+        if isinstance(leaf, np.ndarray):
+            total = total + leaf
+    return total
 
 
 def params_to_tx(mapping):
@@ -185,50 +243,55 @@ def map_dict_names(params: ArrayDict, name_mapping: dict = None) -> ArrayDict:
     return ArrayDict(**{name_mapping[k]: v for k, v in params.items()})
 
 
-def tree_equal(*pytrees: PyTree, typematch: bool = False, rtol=0.0, atol=0.0):
+def tree_equal(*pytrees, typematch: bool = False, rtol=0.0, atol=0.0):
     """Check PyTrees for equality."""
-    flat, treedef = jtu.tree_flatten(pytrees[0])
-    traced_out = True
-    for pytree in pytrees[1:]:
-        flat_, treedef_ = jtu.tree_flatten(pytree)
-        if treedef_ != treedef:
+    if len(pytrees) < 2:
+        return True
+    
+    def compare_trees(t1, t2):
+        leaves1 = tree_leaves(t1)
+        leaves2 = tree_leaves(t2)
+        
+        if len(leaves1) != len(leaves2):
             return False
-        assert len(flat) == len(flat_)
-        for elem, elem_ in zip(flat, flat_):
-            if typematch:
-                if not isinstance(elem, type(elem_)):
+        
+        for l1, l2 in zip(leaves1, leaves2):
+            if typematch and type(l1) != type(l2):
+                return False
+            
+            if isinstance(l1, np.ndarray) and isinstance(l2, np.ndarray):
+                if l1.shape != l2.shape:
                     return False
-            if isinstance(elem, (np.ndarray, np.generic)) and isinstance(elem_, (np.ndarray, np.generic)):
-                if (elem.shape != elem_.shape) or (elem.dtype != elem_.dtype) or not _array_equal(elem, elem_, rtol, atol):
-                    return False
-            elif is_array(elem):
-                if is_array(elem_):
-                    if (elem.shape != elem_.shape) or (elem.dtype != elem_.dtype):
+                if rtol == 0 and atol == 0:
+                    if not np.all(l1 == l2):
                         return False
-                    traced_out = traced_out & _array_equal(elem, elem_, rtol, atol)
                 else:
-                    return False
+                    if not np.allclose(l1, l2, rtol=rtol, atol=atol):
+                        return False
             else:
-                if is_array(elem_):
+                if l1 != l2:
                     return False
-                else:
-                    if elem != elem_:
-                        return False
-    return traced_out
+        
+        return True
+    
+    for t in pytrees[1:]:
+        if not compare_trees(pytrees[0], t):
+            return False
+    
+    return True
 
 
 def is_array(element) -> bool:
-    """Check if element is a JAX or NumPy array."""
-    return isinstance(element, (np.ndarray, np.generic, jax.Array))
+    """Check if element is a numpy array."""
+    return isinstance(element, np.ndarray)
 
 
 def _array_equal(x, y, rtol, atol):
     assert x.dtype == y.dtype
-    npi = jnp if isinstance(x, Array) or isinstance(y, Array) else np
-    if (isinstance(rtol, (int, float)) and isinstance(atol, (int, float)) and rtol == 0 and atol == 0) or not npi.issubdtype(x.dtype, npi.inexact):
-        return npi.all(x == y)
+    if (isinstance(rtol, (int, float)) and isinstance(atol, (int, float)) and rtol == 0 and atol == 0):
+        return np.all(x == y)
     else:
-        return npi.allclose(x, y, rtol=rtol, atol=atol)
+        return np.allclose(x, y, rtol=rtol, atol=atol)
 
 
 class _LeafWrapper:
@@ -242,92 +305,99 @@ def _remove_leaf_wrapper(x: _LeafWrapper) -> Any:
     return x.value
 
 
-class _CountedIdDict:
-    def __init__(self, keys, values):
-        assert len(keys) == len(values)
-        self._dict = {id(k): v for k, v in zip(keys, values)}
-        self._count = {id(k): 0 for k in keys}
-
-    def __contains__(self, item):
-        return id(item) in self._dict
-
-    def __getitem__(self, item):
-        self._count[id(item)] += 1
-        return self._dict[id(item)]
-
-    def get(self, item, default):
-        try:
-            return self[item]
-        except KeyError:
-            return default
-
-    def count(self, item):
-        return self._count[id(item)]
-
-
 def tree_at(
-    where: Callable[[PyTree], Union[Any, Sequence[Any]]],
-    pytree: PyTree,
+    where: Callable[[Any], Union[Any, Sequence[Any]]],
+    pytree: Any,
     replace: Union[Any, Sequence[Any]] = None,
     replace_fn: Callable[[Any], Any] = None,
     is_leaf: Optional[Callable[[Any], bool]] = None,
 ):
-    """Modify a leaf or subtree of a PyTree (like .at[].set() for JAX arrays)."""
+    """Modify a leaf or subtree of a PyTree."""
     node_or_nodes_nowrapper = where(pytree)
-    pytree = jtu.tree_map(_LeafWrapper, pytree, is_leaf=is_leaf)
-    node_or_nodes = where(pytree)
-    leaves1, structure1 = jtu.tree_flatten(node_or_nodes_nowrapper, is_leaf=is_leaf)
-    leaves2, structure2 = jtu.tree_flatten(node_or_nodes)
-    leaves2 = [_remove_leaf_wrapper(x) for x in leaves2]
-    if (structure1 != structure2 or len(leaves1) != len(leaves2) or any(l1 is not l2 for l1, l2 in zip(leaves1, leaves2))):
+    
+    # Wrap pytree
+    def wrap_tree(t):
+        if is_leaf is not None and is_leaf(t):
+            return _LeafWrapper(t)
+        elif isinstance(t, ArrayDict):
+            return ArrayDict(**{k: wrap_tree(v) for k, v in t.items()})
+        elif isinstance(t, dict):
+            return {k: wrap_tree(v) for k, v in t.items()}
+        elif isinstance(t, (list, tuple)):
+            return type(t)(wrap_tree(item) for item in t)
+        else:
+            return _LeafWrapper(t)
+    
+    pytree_wrapped = wrap_tree(pytree)
+    node_or_nodes = where(pytree_wrapped)
+    
+    # Check structure matches
+    leaves1 = tree_leaves(node_or_nodes_nowrapper)
+    leaves2 = [x.value if isinstance(x, _LeafWrapper) else x for x in tree_leaves(node_or_nodes)]
+    
+    if len(leaves1) != len(leaves2) or any(l1 is not l2 for l1, l2 in zip(leaves1, leaves2)):
         raise ValueError("`where` must use just the PyTree structure of `pytree`.")
-    del node_or_nodes_nowrapper, leaves1, structure1, leaves2, structure2
-
-    in_pytree = False
-    def _in_pytree(x):
-        nonlocal in_pytree
-        if x is node_or_nodes:
-            in_pytree = True
-        return x
-
-    jtu.tree_map(_in_pytree, pytree, is_leaf=lambda x: x is node_or_nodes)
-    if in_pytree:
+    
+    # Determine if single or multiple nodes
+    def is_in_tree(node, tree):
+        for leaf in tree_leaves(tree):
+            if leaf is node:
+                return True
+        return False
+    
+    if is_in_tree(node_or_nodes, pytree_wrapped):
         nodes = (node_or_nodes,)
         if replace is not None:
             replace = (replace,)
     else:
-        nodes = node_or_nodes
-    del in_pytree, node_or_nodes
-
-    if replace is None:
-        if replace_fn is None:
-            raise ValueError("Precisely one of `replace` and `replace_fn` must be specified.")
-        else:
-            def _replace_fn(x):
-                x = jtu.tree_map(_remove_leaf_wrapper, x)
-                return replace_fn(x)
-            replace_fns = [_replace_fn] * len(nodes)
+        nodes = node_or_nodes if isinstance(node_or_nodes, (list, tuple)) else (node_or_nodes,)
+    
+    if replace is None and replace_fn is None:
+        raise ValueError("Precisely one of `replace` and `replace_fn` must be specified.")
+    
+    if replace is not None and replace_fn is not None:
+        raise ValueError("Precisely one of `replace` and `replace_fn` must be specified.")
+    
+    # Create replacement functions
+    if replace_fn is not None:
+        replace_fns = [replace_fn] * len(nodes)
     else:
-        if replace_fn is None:
-            if len(nodes) != len(replace):
-                raise ValueError("`where` must return a sequence of leaves of the same length as `replace`.")
-            replace_fns = [lambda _, r=r: r for r in replace]
+        if len(nodes) != len(replace):
+            raise ValueError("`where` must return a sequence of leaves of the same length as `replace`.")
+        replace_fns = [lambda _, r=r: r for r in replace]
+    
+    # Apply replacements
+    def apply_replacement(t, target_nodes, node_fns):
+        if isinstance(t, _LeafWrapper):
+            for i, node in enumerate(target_nodes):
+                if t is node:
+                    return _LeafWrapper(node_fns[i](t.value))
+            return t
+        elif isinstance(t, ArrayDict):
+            return ArrayDict(**{k: apply_replacement(v, target_nodes, node_fns) for k, v in t.items()})
+        elif isinstance(t, dict):
+            return {k: apply_replacement(v, target_nodes, node_fns) for k, v in t.items()}
+        elif isinstance(t, (list, tuple)):
+            return type(t)(apply_replacement(item, target_nodes, node_fns) for item in t)
         else:
-            raise ValueError("Precisely one of `replace` and `replace_fn` must be specified.")
-    node_replace_fns = _CountedIdDict(nodes, replace_fns)
-
-    def _make_replacement(x: Any) -> Any:
-        return node_replace_fns.get(x, _remove_leaf_wrapper)(x)
-
-    out = jtu.tree_map(_make_replacement, pytree, is_leaf=lambda x: x in node_replace_fns)
-
-    for node in nodes:
-        count = node_replace_fns.count(node)
-        if count == 0:
-            raise ValueError("`where` does not specify an element or elements of `pytree`.")
-        elif count == 1:
-            pass
+            for i, node in enumerate(target_nodes):
+                if t is node:
+                    return node_fns[i](t)
+            return t
+    
+    result = apply_replacement(pytree_wrapped, nodes, replace_fns)
+    
+    # Unwrap
+    def unwrap_tree(t):
+        if isinstance(t, _LeafWrapper):
+            return t.value
+        elif isinstance(t, ArrayDict):
+            return ArrayDict(**{k: unwrap_tree(v) for k, v in t.items()})
+        elif isinstance(t, dict):
+            return {k: unwrap_tree(v) for k, v in t.items()}
+        elif isinstance(t, (list, tuple)):
+            return type(t)(unwrap_tree(item) for item in t)
         else:
-            raise ValueError("`where` does not uniquely identify a single element of `pytree`.")
-
-    return out
+            return t
+    
+    return unwrap_tree(result)

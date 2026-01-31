@@ -14,11 +14,8 @@
 # limitations under the License.
 
 from typing import Optional
-import jax.numpy as jnp
-from jax.lax import lgamma
-from jax import random as jr
-from jax.scipy import special as jsp
-from jaxtyping import Array, PRNGKeyArray
+import numpy as np
+from scipy.special import gammaln, digamma
 
 from .base import Conjugate
 from ..exponential.base import ExponentialFamily
@@ -33,10 +30,7 @@ class Multinomial(Conjugate):
     """
     Dirichlet conjugate prior for Multinomial - CUDA accelerated.
     
-    Wraps C++ CUDA kernels for:
-    - Digamma and gammaln functions
-    - Posterior parameter updates
-    - KL divergence computation
+    Uses scipy for digamma and gammaln functions.
     """
 
     def __init__(
@@ -47,7 +41,7 @@ class Multinomial(Conjugate):
         event_shape: Optional[tuple] = None,
         event_dim: Optional[int] = None,
         initial_count: float = 1.0,
-        init_key: Optional[PRNGKeyArray] = None,
+        init_key: Optional[np.ndarray] = None,
     ):
         if event_shape is not None:
             event_dim = len(event_shape)
@@ -57,11 +51,11 @@ class Multinomial(Conjugate):
         if prior_params is None:
             prior_params = self.init_default_params(batch_shape, event_shape, initial_count)
         if params is None:
-            init_key = jr.PRNGKey(0) if init_key is None else init_key
+            # Initialize with slight perturbation from prior
             params = {}
             for k, v in prior_params.items():
                 if k == "alpha":
-                    params[k] = v * (1 + jr.uniform(init_key, shape=v.shape))
+                    params[k] = v * (1 + np.random.uniform(0, 0.1, v.shape))
                 else:
                     params[k] = v
             params = ArrayDict(**params)
@@ -75,15 +69,15 @@ class Multinomial(Conjugate):
     @staticmethod
     def init_default_params(batch_shape, event_shape, initial_counts: float = 1.0) -> ArrayDict:
         """Initialize default canonical parameters."""
-        return ArrayDict(alpha=initial_counts * jnp.ones(batch_shape + event_shape))
+        return ArrayDict(alpha=initial_counts * np.ones(batch_shape + event_shape))
 
     @property
-    def alpha(self) -> Array:
+    def alpha(self) -> np.ndarray:
         """Property accessing posterior Dirichlet parameters."""
         return self.posterior_params.eta.eta_1
 
     @property
-    def prior_alpha(self) -> Array:
+    def prior_alpha(self) -> np.ndarray:
         """Property accessing prior Dirichlet parameters."""
         return self.prior_params.eta.eta_1
 
@@ -95,43 +89,44 @@ class Multinomial(Conjugate):
         """Computes expected natural parameters <S(θ)>."""
         return ArrayDict(eta_1=self.alpha / self.sum_events(self.alpha, keepdims=True))
 
-    def expected_log_likelihood(self, x: Array) -> Array:
+    def expected_log_likelihood(self, x: np.ndarray) -> np.ndarray:
         """Computes expected log likelihood."""
-        return self.sum_events(x * self.log_mean()) + lgamma(1 + self.sum_events(x)) - self.sum_events(lgamma(1 + x))
+        from scipy.special import gammaln
+        return self.sum_events(x * self.log_mean()) + gammaln(1 + self.sum_events(x)) - self.sum_events(gammaln(1 + x))
 
     def expected_posterior_statistics(self) -> ArrayDict:
         """Computes expected sufficient statistics."""
-        alpha_stats = jsp.digamma(self.alpha) - jsp.digamma(self.sum_events(self.alpha, keepdims=True))
+        alpha_stats = digamma(self.alpha) - digamma(self.sum_events(self.alpha, keepdims=True))
         return ArrayDict(eta=ArrayDict(eta_1=alpha_stats), nu=None)
 
-    def expected_log_partition(self) -> Array:
+    def expected_log_partition(self) -> np.ndarray:
         """Computes expected log partition."""
-        return self.sum_events(jsp.digamma(self.alpha)) - jsp.digamma(self.sum_events(self.alpha))
+        return self.sum_events(digamma(self.alpha)) - digamma(self.sum_events(self.alpha))
 
-    def log_prior_partition(self) -> Array:
+    def log_prior_partition(self) -> np.ndarray:
         """Computes log partition of prior."""
-        return self.sum_events(jsp.gammaln(self.alpha)) - jsp.gammaln(self.sum_events(self.alpha))
+        return self.sum_events(gammaln(self.alpha)) - gammaln(self.sum_events(self.alpha))
 
-    def log_posterior_partition(self) -> Array:
+    def log_posterior_partition(self) -> np.ndarray:
         """Computes log partition of posterior."""
-        return self.sum_events(jsp.gammaln(self.alpha)) - jsp.gammaln(self.sum_events(self.alpha))
+        return self.sum_events(gammaln(self.alpha)) - gammaln(self.sum_events(self.alpha))
 
-    def residual(self) -> Array:
+    def residual(self) -> np.ndarray:
         """Computes residual."""
         raise NotImplementedError
 
-    def kl_divergence(self) -> Array:
+    def kl_divergence(self) -> np.ndarray:
         """Computes KL divergence."""
         alpha_sum = self.sum_events(self.alpha)
         prior_alpha_sum = self.sum_events(self.prior_alpha)
         return (
-            lgamma(alpha_sum)
-            - self.sum_events(lgamma(self.alpha))
-            - lgamma(prior_alpha_sum)
-            + self.sum_events(lgamma(self.prior_alpha))
+            gammaln(alpha_sum)
+            - self.sum_events(gammaln(self.alpha))
+            - gammaln(prior_alpha_sum)
+            + self.sum_events(gammaln(self.prior_alpha))
             + self.sum_events(
                 (self.alpha - self.prior_alpha)
-                * (jsp.digamma(self.alpha) - self.expand_event_dims(jsp.digamma(alpha_sum)))
+                * (digamma(self.alpha) - self.expand_event_dims(digamma(alpha_sum)))
             )
         )
 
@@ -139,24 +134,25 @@ class Multinomial(Conjugate):
         """Returns message distribution with parameters <S(θ)>."""
         raise NotImplementedError
 
-    def mean(self) -> Array:
+    def mean(self) -> np.ndarray:
         """The mean of the distribution."""
         return self.alpha / self.sum_events(self.alpha, keepdims=True)
 
-    def log_mean(self) -> Array:
+    def log_mean(self) -> np.ndarray:
         """The log geometric mean."""
-        return jsp.digamma(self.alpha) - jsp.digamma(self.sum_events(self.alpha, keepdims=True))
+        return digamma(self.alpha) - digamma(self.sum_events(self.alpha, keepdims=True))
 
-    def mode(self) -> Array:
+    def mode(self) -> np.ndarray:
         """Computes mode."""
         raise NotImplementedError
 
-    def variance(self) -> Array:
+    def variance(self) -> np.ndarray:
         """The variance."""
         alpha_sum = self.sum_events(self.alpha, keepdims=True)
         return self.alpha * (alpha_sum - self.alpha) / (alpha_sum**2 * (alpha_sum + 1))
 
-    def sample(self, key, shape=()) -> Array:
+    def sample(self, key, shape=()) -> np.ndarray:
         """Draw random samples."""
-        samples = jr.dirichlet(key, self.alpha, shape=shape + self.batch_shape)
-        return jnp.clip(samples, a_min=jnp.finfo(samples).tiny, a_max=1 - jnp.finfo(samples).eps)
+        from numpy.random import dirichlet
+        samples = dirichlet(self.alpha.flatten(), size=shape + self.batch_shape)
+        return np.clip(samples, a_min=np.finfo(samples.dtype).tiny, a_max=1 - np.finfo(samples.dtype).eps)

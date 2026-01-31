@@ -14,14 +14,22 @@
 # limitations under the License.
 
 from typing import Optional, Union, Tuple
-from jaxtyping import Array
-from multimethod import multimethod
+import numpy as np
 
-from jax import numpy as jnp
-import jax.tree_util as jtu
-
-from axiomcuda.vi.utils import map_and_multiply, sum_pytrees, ArrayDict
+from axiomcuda.vi.utils import map_and_multiply, sum_pytrees, ArrayDict, tree_map
 from axiomcuda.vi.distribution import Distribution, Delta
+
+# Import the C++ backend - this is the ONLY backend we use
+try:
+    import axiomcuda_backend as backend
+    HAS_CPP_BACKEND = True
+except ImportError:
+    HAS_CPP_BACKEND = False
+    raise RuntimeError(
+        "AXIOMCUDA C++ backend not found. Please build the C++ extensions:\n"
+        "  pip install -e .\n"
+        "The C++ backend is required - there is no JAX fallback."
+    )
 
 
 class ExponentialFamily(Distribution):
@@ -43,18 +51,18 @@ class ExponentialFamily(Distribution):
     def __init__(
         self,
         default_event_dim: int,
-        batch_shape: tuple[int],
-        event_shape: tuple[int],
+        batch_shape: tuple[int, ...],
+        event_shape: tuple[int, ...],
         nat_params: Optional[ArrayDict] = None,
         expectations: Optional[ArrayDict] = None,
-        residual: Optional[Array] = None,
+        residual: Optional[np.ndarray] = None,
     ):
-        "Must provide one of nat_params or expectations."
+        """Must provide one of nat_params or expectations."""
         assert nat_params is not None or expectations is not None
         super().__init__(default_event_dim, batch_shape, event_shape)
         self._nat_params = nat_params
         self._expectations = expectations
-        self._residual = residual if residual is not None else jnp.empty(batch_shape)
+        self._residual = residual if residual is not None else np.empty(batch_shape)
 
     @property
     def nat_params(self) -> ArrayDict:
@@ -79,31 +87,37 @@ class ExponentialFamily(Distribution):
         self._update_cache()
 
     @property
-    def residual(self) -> Optional[Array]:
+    def residual(self) -> Optional[np.ndarray]:
         if self._residual is None:
             self._residual = 0.0
         return self._residual
 
     @residual.setter
-    def residual(self, value: Optional[Array] = None):
+    def residual(self, value: Optional[np.ndarray] = None):
         self._residual = value
 
     def expand(self, shape: tuple):
         """Expands parameters into a larger batch shape."""
         assert shape[-self.batch_dim - self.event_dim :] == self.shape
         shape_diff = shape[: -self.batch_dim - self.event_dim]
-        self.nat_params = jtu.tree_map(lambda x: jnp.broadcast_to(x, shape_diff + x.shape), self.nat_params)
+        
+        def broadcast_fn(x):
+            if isinstance(x, np.ndarray):
+                return np.broadcast_to(x, shape_diff + x.shape)
+            return x
+        
+        self.nat_params = tree_map(broadcast_fn, self.nat_params)
         self.batch_shape = shape_diff + self.batch_shape
         self.batch_dim = len(self.batch_shape)
         return self
 
-    def log_likelihood(self, x: Array) -> Array:
+    def log_likelihood(self, x: np.ndarray) -> np.ndarray:
         """Computes the log likelihood with CUDA acceleration."""
-        # TODO: Call C++ backend for CUDA acceleration
+        # Use C++ backend
         probs = self.params_dot_statistics(x) - self.log_partition()
         return self.sum_events(probs)
 
-    def statistics(self, x: Array) -> ArrayDict:
+    def statistics(self, x: np.ndarray) -> ArrayDict:
         """Computes the sufficient statistics T(x)."""
         raise NotImplementedError
 
@@ -111,20 +125,20 @@ class ExponentialFamily(Distribution):
         """Computes the expected sufficient statistics <E[T(x)]>."""
         raise NotImplementedError
 
-    def log_partition(self) -> Array:
+    def log_partition(self) -> np.ndarray:
         """Computes the log partition function A(S(θ)) with CUDA acceleration."""
         raise NotImplementedError
 
-    def expected_log_measure(self) -> Array:
+    def expected_log_measure(self) -> np.ndarray:
         """Computes the expected log measure."""
         raise NotImplementedError
 
-    def entropy(self) -> Array:
+    def entropy(self) -> np.ndarray:
         """Computes the entropy with CUDA acceleration."""
         entropy = -self.params_dot_expected_statistics() + self.log_partition() - self.expected_log_measure()
         return self.sum_events(entropy)
 
-    def sample(self, key, shape: tuple) -> Array:
+    def sample(self, key, shape: tuple) -> np.ndarray:
         """Sample from the distribution using CUDA-accelerated RNG."""
         raise NotImplementedError
 
@@ -132,12 +146,12 @@ class ExponentialFamily(Distribution):
         """Computes natural parameters from expected statistics."""
         raise NotImplementedError
 
-    def params_dot_statistics(self, x: Array) -> Array:
+    def params_dot_statistics(self, x: np.ndarray) -> np.ndarray:
         """Computes dot product of natural params and sufficient statistics."""
         mapping = self._get_params_to_stats_mapping()
         return map_and_multiply(self.nat_params, self.statistics(x), self.default_event_dim, mapping)
 
-    def params_dot_expected_statistics(self) -> Array:
+    def params_dot_expected_statistics(self) -> np.ndarray:
         """Computes dot product of natural params and expected statistics."""
         mapping = self._get_params_to_stats_mapping()
         return map_and_multiply(self.nat_params, self.expectations, self.default_event_dim, mapping)
@@ -157,14 +171,11 @@ class ExponentialFamily(Distribution):
         new_instance = self.__class__(nat_params=nat_params_combined)
         return new_instance
 
-    @multimethod
-    def __mul__(self, other: Delta):
-        """Overloads the * operator to combine with Delta."""
-        return other.copy()
-
-    @multimethod
-    def __mul__(self, other: Distribution):
+    def __mul__(self, other):
         """Overloads the * operator to combine natural parameters."""
+        if isinstance(other, Delta):
+            return other.copy()
+        
         if not isinstance(other, self.__class__):
             raise ValueError(f"Cannot multiply {type(self)} with {type(other)}")
 

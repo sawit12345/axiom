@@ -14,16 +14,16 @@
 # limitations under the License.
 
 """
-Utility functions for AxiomCUDA.
+Utility functions for AxiomCUDA using C++ backend.
 
-Provides tree operations (similar to jax.tree_util), array handling,
-type conversions, and batch processing utilities.
+Provides tree operations, array handling, type conversions, and batch processing utilities.
 """
 
 import numpy as np
 from typing import Any, Callable, Sequence, Tuple, List, Dict, Union
 from collections.abc import Mapping
 from functools import partial
+import axiomcuda_backend as backend
 
 
 # Tree structure representation
@@ -389,21 +389,8 @@ def broadcast_arrays(*arrays) -> List[np.ndarray]:
     # Broadcast each array
     result = []
     for a in arrays:
-        # Calculate strides for broadcasting
-        strides = []
-        for i, (d, target) in enumerate(zip([1] * (max_ndim - a.ndim) + list(a.shape), result_shape)):
-            if d == 1:
-                strides.append(0)
-            else:
-                stride = 1
-                for s in a.shape[i - (max_ndim - a.ndim) + 1:]:
-                    stride *= s
-                strides.append(stride)
-        
-        # Use stride tricks to broadcast
-        broadcasted = np.lib.stride_tricks.as_strided(
-            a, shape=result_shape, strides=tuple(strides[-a.ndim:]) if a.ndim > 0 else ()
-        )
+        # Use numpy's broadcast_to
+        broadcasted = np.broadcast_to(a, result_shape)
         result.append(broadcasted)
     
     return result

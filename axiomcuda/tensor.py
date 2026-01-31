@@ -14,30 +14,26 @@
 # limitations under the License.
 
 """
-Tensor wrapper for AxiomCUDA.
+Tensor wrapper for AxiomCUDA using C++ backend.
 
-Provides a numpy-compatible interface for the C++ Tensor class,
-with GPU/CPU transfer methods and autograd support.
+Wraps the C++ Tensor class to provide a Pythonic interface.
 """
 
 import numpy as np
 from typing import Optional, Tuple, Union, List
+import axiomcuda_backend as backend
 from .device import Device, get_device
 
 
 class Tensor:
-    """Numpy-compatible tensor with GPU acceleration support.
+    """Numpy-compatible tensor with GPU acceleration via C++ backend.
     
-    This class wraps the underlying C++ Tensor class to provide a
-    Pythonic interface while supporting:
-    - Numpy-compatible operations
-    - GPU/CPU memory transfer
-    - Automatic differentiation (autograd)
-    - Device-agnostic computation
+    This class wraps the C++ backend.Tensor class to provide a
+    Pythonic interface with numpy compatibility.
     
     Attributes:
         shape: Shape of the tensor
-        dtype: Data type of the tensor
+        dtype: Data type of the tensor  
         device: Device where the tensor is stored
         
     Example:
@@ -59,7 +55,7 @@ class Tensor:
     
     def __init__(
         self,
-        data: Union[np.ndarray, List, float, int, 'Tensor'],
+        data: Union[np.ndarray, List, float, int, 'Tensor', backend.tensor.Tensor],
         dtype: Optional[np.dtype] = None,
         device: Optional[Union[str, Device]] = None,
         requires_grad: bool = False,
@@ -67,73 +63,64 @@ class Tensor:
         """Initialize a Tensor.
         
         Args:
-            data: Input data (numpy array, list, scalar, or another Tensor)
+            data: Input data (numpy array, list, scalar, Tensor, or backend Tensor)
             dtype: Target data type (optional)
             device: Target device (optional, defaults to current default)
             requires_grad: Whether to track gradients for autograd
         """
         # Handle different input types
-        if isinstance(data, Tensor):
-            self._data = data._data.copy()
-            self._device = data._device
-            self._grad = data._grad
-            self._grad_fn = data._grad_fn
+        if isinstance(data, backend.tensor.Tensor):
+            # Already a backend tensor
+            self._tensor = data
+        elif isinstance(data, Tensor):
+            # Copy from another Tensor
+            self._tensor = data._tensor.copy()
         elif isinstance(data, np.ndarray):
-            self._data = data.copy()
-            self._device = Device('cpu')
-            self._grad = None
-            self._grad_fn = None
+            # Create from numpy array
+            self._tensor = backend.tensor.Tensor.from_numpy(data.astype(np.float64))
         else:
-            self._data = np.array(data)
-            self._device = Device('cpu')
-            self._grad = None
-            self._grad_fn = None
-        
-        # Apply dtype if specified
-        if dtype is not None:
-            self._data = self._data.astype(dtype)
+            # Convert to numpy first
+            arr = np.array(data, dtype=np.float64)
+            self._tensor = backend.tensor.Tensor.from_numpy(arr)
         
         # Move to device if specified
         if device is not None:
             dev = get_device(device)
-            if dev != self._device:
-                self._data = self._to_device(self._data, dev)
-                self._device = dev
+            if dev.is_cuda:
+                self._tensor = self._tensor.cuda(dev.id)
         
         self._requires_grad = requires_grad
-    
-    def _to_device(self, data: np.ndarray, device: Device) -> np.ndarray:
-        """Transfer data to a device (internal helper)."""
-        if device.is_cpu:
-            return data
-        # For GPU, this would involve actual CUDA transfer
-        # For now, just return the data
-        return data
+        self._grad = None
+        self._grad_fn = None
     
     @property
     def shape(self) -> Tuple[int, ...]:
         """Get tensor shape."""
-        return self._data.shape
+        return self._tensor.shape
     
     @property
     def ndim(self) -> int:
         """Get number of dimensions."""
-        return self._data.ndim
+        return len(self._tensor.shape)
     
     @property
     def dtype(self) -> np.dtype:
         """Get data type."""
-        return self._data.dtype
+        return np.float64  # C++ backend uses float64
     
     @property
     def size(self) -> int:
         """Get total number of elements."""
-        return self._data.size
+        return int(np.prod(self._tensor.shape))
     
     @property
     def device(self) -> Device:
         """Get current device."""
-        return self._device
+        device_str = self._tensor.device
+        if device_str.startswith('cuda'):
+            device_id = int(device_str.split(':')[1]) if ':' in device_str else 0
+            return Device('cuda', device_id)
+        return Device('cpu')
     
     @property
     def requires_grad(self) -> bool:
@@ -142,16 +129,13 @@ class Tensor:
     
     def numpy(self) -> np.ndarray:
         """Convert to numpy array (always returns CPU copy)."""
-        if self._device.is_cuda:
-            # Would transfer from GPU in real implementation
-            pass
-        return self._data.copy()
+        return self._tensor.to_numpy()
     
     def cpu(self) -> 'Tensor':
         """Move tensor to CPU."""
-        if self._device.is_cpu:
+        if not self._tensor.is_cuda():
             return self
-        new_tensor = Tensor(self._data, device='cpu')
+        new_tensor = Tensor(self._tensor.cpu())
         new_tensor._requires_grad = self._requires_grad
         return new_tensor
     
@@ -164,10 +148,9 @@ class Tensor:
         Returns:
             Tensor on GPU
         """
-        device = Device('cuda', device_id)
-        if self._device == device:
+        if self._tensor.is_cuda():
             return self
-        new_tensor = Tensor(self._data, device=device)
+        new_tensor = Tensor(self._tensor.cuda(device_id))
         new_tensor._requires_grad = self._requires_grad
         return new_tensor
     
@@ -181,15 +164,13 @@ class Tensor:
             Tensor on target device
         """
         dev = get_device(device)
-        if self._device == dev:
-            return self
-        new_tensor = Tensor(self._data, device=dev)
-        new_tensor._requires_grad = self._requires_grad
-        return new_tensor
+        if dev.is_cuda:
+            return self.cuda(dev.id)
+        return self.cpu()
     
     def copy(self) -> 'Tensor':
         """Create a copy of the tensor."""
-        new_tensor = Tensor(self._data.copy(), device=self._device)
+        new_tensor = Tensor(self._tensor.copy())
         new_tensor._requires_grad = self._requires_grad
         if self._grad is not None:
             new_tensor._grad = self._grad.copy()
@@ -201,7 +182,7 @@ class Tensor:
     
     def detach(self) -> 'Tensor':
         """Return a new tensor detached from the computation graph."""
-        new_tensor = Tensor(self._data, device=self._device)
+        new_tensor = Tensor(self._tensor)
         new_tensor._requires_grad = False
         new_tensor._grad = None
         new_tensor._grad_fn = None
@@ -217,44 +198,42 @@ class Tensor:
             raise RuntimeError("Tensor does not require gradients")
         
         if grad_output is None:
-            # Assume scalar output, grad is 1
-            grad_output = Tensor(np.ones_like(self._data))
+            grad_output = Tensor(np.ones(self.shape))
         
-        # Store the gradient
-        self._grad = grad_output._data if isinstance(grad_output, Tensor) else grad_output
-        
-        # In a full implementation, this would propagate gradients
-        # through the computation graph via _grad_fn
+        self._grad = grad_output.numpy() if isinstance(grad_output, Tensor) else grad_output
     
     @property
     def grad(self) -> Optional['Tensor']:
         """Get the gradient of this tensor."""
         if self._grad is None:
             return None
-        return Tensor(self._grad, device=self._device)
+        return Tensor(self._grad, device=self.device)
     
     def zero_grad(self) -> None:
         """Zero out the gradient."""
         self._grad = None
     
-    # Numpy-compatible methods
+    # Shape operations
     
     def reshape(self, *shape: int) -> 'Tensor':
         """Reshape tensor."""
-        new_data = self._data.reshape(shape)
-        return Tensor(new_data, device=self._device)
+        new_shape = shape[0] if len(shape) == 1 and isinstance(shape[0], (list, tuple)) else shape
+        return Tensor(self._tensor.reshape(new_shape))
     
-    def transpose(self, *axes: int) -> 'Tensor':
+    def view(self, *shape: int) -> 'Tensor':
+        """View tensor with new shape."""
+        return self.reshape(*shape)
+    
+    def transpose(self, dim0: int = -1, dim1: int = -2) -> 'Tensor':
         """Transpose tensor dimensions."""
-        if len(axes) == 0:
-            new_data = self._data.T
-        else:
-            new_data = self._data.transpose(axes)
-        return Tensor(new_data, device=self._device)
+        if dim0 == -1 and dim1 == -2:
+            # Reverse all dimensions
+            return Tensor(self._tensor.transpose())
+        return Tensor(self._tensor.transpose(dim0, dim1))
     
     def permute(self, *dims: int) -> 'Tensor':
-        """Permute tensor dimensions (same as transpose)."""
-        return self.transpose(*dims)
+        """Permute tensor dimensions."""
+        return Tensor(self._tensor.permute(dims))
     
     def flatten(self) -> 'Tensor':
         """Flatten to 1D."""
@@ -262,57 +241,65 @@ class Tensor:
     
     def squeeze(self, axis: Optional[int] = None) -> 'Tensor':
         """Remove dimensions of size 1."""
-        new_data = self._data.squeeze(axis)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.squeeze())
+        return Tensor(self._tensor.squeeze(axis))
     
     def unsqueeze(self, axis: int) -> 'Tensor':
         """Add a dimension of size 1 at the specified position."""
-        new_data = np.expand_dims(self._data, axis)
-        return Tensor(new_data, device=self._device)
+        return Tensor(self._tensor.unsqueeze(axis))
     
     def expand_dims(self, axis: int) -> 'Tensor':
         """Alias for unsqueeze."""
         return self.unsqueeze(axis)
     
+    # Reduction operations
+    
     def sum(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False) -> 'Tensor':
         """Sum elements along axis."""
-        new_data = self._data.sum(axis=axis, keepdims=keepdims)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.sum())
+        return Tensor(self._tensor.sum(axis, keepdims))
     
     def mean(self, axis: Optional[Union[int, Tuple[int, ...]]] = None, keepdims: bool = False) -> 'Tensor':
         """Compute mean along axis."""
-        new_data = self._data.mean(axis=axis, keepdims=keepdims)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.mean())
+        return Tensor(self._tensor.mean(axis, keepdims))
     
     def max(self, axis: Optional[int] = None, keepdims: bool = False) -> 'Tensor':
         """Compute maximum along axis."""
-        new_data = self._data.max(axis=axis, keepdims=keepdims)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.max())
+        return Tensor(self._tensor.max(axis, keepdims))
     
     def min(self, axis: Optional[int] = None, keepdims: bool = False) -> 'Tensor':
         """Compute minimum along axis."""
-        new_data = self._data.min(axis=axis, keepdims=keepdims)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.min())
+        return Tensor(self._tensor.min(axis, keepdims))
     
     def argmax(self, axis: Optional[int] = None) -> 'Tensor':
         """Return indices of maximum values."""
-        new_data = self._data.argmax(axis=axis)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.argmax())
+        return Tensor(self._tensor.argmax(axis))
     
     def argmin(self, axis: Optional[int] = None) -> 'Tensor':
         """Return indices of minimum values."""
-        new_data = self._data.argmin(axis=axis)
-        return Tensor(new_data, device=self._device)
+        if axis is None:
+            return Tensor(self._tensor.argmin())
+        return Tensor(self._tensor.argmin(axis))
+    
+    # Linear algebra
     
     def dot(self, other: 'Tensor') -> 'Tensor':
         """Compute dot product."""
-        new_data = np.dot(self._data, other._data)
-        return Tensor(new_data, device=self._device)
+        return Tensor(backend.tensor.dot(self._tensor, other._tensor))
     
     def matmul(self, other: 'Tensor') -> 'Tensor':
         """Matrix multiplication."""
-        new_data = np.matmul(self._data, other._data)
-        return Tensor(new_data, device=self._device)
+        return Tensor(backend.tensor.matmul(self._tensor, other._tensor))
     
     @property
     def T(self) -> 'Tensor':
@@ -323,274 +310,263 @@ class Tensor:
     
     def __getitem__(self, index) -> 'Tensor':
         """Get item (supports numpy-style indexing)."""
-        new_data = self._data[index]
-        return Tensor(new_data, device=self._device)
+        return Tensor(self._tensor[index])
     
     def __setitem__(self, index, value) -> None:
         """Set item."""
         if isinstance(value, Tensor):
-            value = value._data
-        self._data[index] = value
+            value = value._tensor
+        self._tensor[index] = value
     
-    # Arithmetic operations
+    # Arithmetic operations - delegate to backend
     
     def __add__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data + other, device=self._device)
+            return Tensor(self._tensor.add(other._tensor))
+        return Tensor(self._tensor.add(float(other)))
     
     def __radd__(self, other) -> 'Tensor':
         return self.__add__(other)
     
     def __sub__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data - other, device=self._device)
+            return Tensor(self._tensor.subtract(other._tensor))
+        return Tensor(self._tensor.subtract(float(other)))
     
     def __rsub__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(other - self._data, device=self._device)
+            return Tensor(other._tensor.subtract(self._tensor))
+        return Tensor(backend.tensor.subtract(float(other), self._tensor))
     
     def __mul__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data * other, device=self._device)
+            return Tensor(self._tensor.multiply(other._tensor))
+        return Tensor(self._tensor.multiply(float(other)))
     
     def __rmul__(self, other) -> 'Tensor':
         return self.__mul__(other)
     
     def __truediv__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data / other, device=self._device)
+            return Tensor(self._tensor.divide(other._tensor))
+        return Tensor(self._tensor.divide(float(other)))
     
     def __rtruediv__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(other / self._data, device=self._device)
+            return Tensor(other._tensor.divide(self._tensor))
+        return Tensor(backend.tensor.divide(float(other), self._tensor))
     
     def __pow__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data ** other, device=self._device)
+            return Tensor(self._tensor.power(other._tensor))
+        return Tensor(self._tensor.power(float(other)))
     
     def __matmul__(self, other) -> 'Tensor':
         return self.matmul(other)
     
     def __neg__(self) -> 'Tensor':
-        return Tensor(-self._data, device=self._device)
+        return Tensor(self._tensor.negate())
     
     def __abs__(self) -> 'Tensor':
-        return Tensor(np.abs(self._data), device=self._device)
+        return Tensor(self._tensor.abs())
     
     # Comparison operations
     
     def __eq__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data == other, device=self._device)
+            return Tensor(self._tensor.eq(other._tensor))
+        return Tensor(self._tensor.eq(float(other)))
     
     def __ne__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data != other, device=self._device)
+            return Tensor(self._tensor.ne(other._tensor))
+        return Tensor(self._tensor.ne(float(other)))
     
     def __lt__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data < other, device=self._device)
+            return Tensor(self._tensor.lt(other._tensor))
+        return Tensor(self._tensor.lt(float(other)))
     
     def __le__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data <= other, device=self._device)
+            return Tensor(self._tensor.le(other._tensor))
+        return Tensor(self._tensor.le(float(other)))
     
     def __gt__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data > other, device=self._device)
+            return Tensor(self._tensor.gt(other._tensor))
+        return Tensor(self._tensor.gt(float(other)))
     
     def __ge__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        return Tensor(self._data >= other, device=self._device)
+            return Tensor(self._tensor.ge(other._tensor))
+        return Tensor(self._tensor.ge(float(other)))
     
     # In-place operations
     
     def __iadd__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        self._data += other
+            self._tensor = self._tensor.add(other._tensor)
+        else:
+            self._tensor = self._tensor.add(float(other))
         return self
     
     def __isub__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        self._data -= other
+            self._tensor = self._tensor.subtract(other._tensor)
+        else:
+            self._tensor = self._tensor.subtract(float(other))
         return self
     
     def __imul__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        self._data *= other
+            self._tensor = self._tensor.multiply(other._tensor)
+        else:
+            self._tensor = self._tensor.multiply(float(other))
         return self
     
     def __itruediv__(self, other) -> 'Tensor':
         if isinstance(other, Tensor):
-            other = other._data
-        self._data /= other
+            self._tensor = self._tensor.divide(other._tensor)
+        else:
+            self._tensor = self._tensor.divide(float(other))
         return self
     
     # Representation
     
     def __repr__(self) -> str:
-        device_str = str(self._device)
-        grad_str = ", grad_fn=" + str(self._grad_fn) if self._grad_fn else ""
-        return f"Tensor({self._data}, device={device_str}{grad_str})"
+        return f"Tensor({self._tensor}, requires_grad={self._requires_grad})"
     
     def __str__(self) -> str:
-        return str(self._data)
+        return str(self._tensor)
     
     def __len__(self) -> int:
-        return len(self._data)
+        return self.shape[0] if len(self.shape) > 0 else 0
     
     def __iter__(self):
-        for i in range(len(self._data)):
+        for i in range(len(self)):
             yield self[i]
-    
-    def __contains__(self, item) -> bool:
-        return item in self._data
     
     # Array protocol
     
     def __array__(self, dtype=None):
         """Numpy array protocol support."""
-        if dtype is None:
-            return self._data
-        return self._data.astype(dtype)
+        arr = self.numpy()
+        if dtype is not None:
+            return arr.astype(dtype)
+        return arr
 
 
-# Utility functions
+# Utility functions using backend
 
 def zeros(shape: Tuple[int, ...], dtype: np.dtype = np.float64, device=None) -> Tensor:
     """Create a tensor of zeros."""
-    data = np.zeros(shape, dtype=dtype)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.zeros(shape, device_str))
 
 
 def ones(shape: Tuple[int, ...], dtype: np.dtype = np.float64, device=None) -> Tensor:
     """Create a tensor of ones."""
-    data = np.ones(shape, dtype=dtype)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.ones(shape, device_str))
 
 
 def zeros_like(tensor: Tensor, dtype=None, device=None) -> Tensor:
     """Create a tensor of zeros with the same shape."""
     shape = tensor.shape
-    dtype = dtype if dtype is not None else tensor.dtype
     device = device if device is not None else tensor.device
-    return zeros(shape, dtype, device)
+    return zeros(shape, dtype or np.float64, device)
 
 
 def ones_like(tensor: Tensor, dtype=None, device=None) -> Tensor:
     """Create a tensor of ones with the same shape."""
     shape = tensor.shape
-    dtype = dtype if dtype is not None else tensor.dtype
     device = device if device is not None else tensor.device
-    return ones(shape, dtype, device)
+    return ones(shape, dtype or np.float64, device)
 
 
 def full(shape: Tuple[int, ...], fill_value, dtype=None, device=None) -> Tensor:
     """Create a tensor filled with a value."""
-    if dtype is None:
-        dtype = np.array(fill_value).dtype
-    data = np.full(shape, fill_value, dtype=dtype)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.full(shape, float(fill_value), device_str))
 
 
 def arange(start: int, stop: Optional[int] = None, step: int = 1, dtype=None, device=None) -> Tensor:
     """Create a range of values."""
-    data = np.arange(start, stop, step, dtype=dtype)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.arange(start, stop, step, device_str))
 
 
 def linspace(start: float, stop: float, num: int = 50, device=None) -> Tensor:
     """Create linearly spaced values."""
-    data = np.linspace(start, stop, num)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.linspace(start, stop, num, device_str))
 
 
 def eye(n: int, m: Optional[int] = None, dtype=np.float64, device=None) -> Tensor:
     """Create an identity matrix."""
-    data = np.eye(n, m, dtype=dtype)
-    return Tensor(data, device=device)
+    device_str = device.type if isinstance(device, Device) else str(device) if device else 'cpu'
+    return Tensor(backend.tensor.eye(n, m, device_str))
 
 
 def diag(v: Union[Tensor, np.ndarray], k: int = 0) -> Tensor:
     """Extract diagonal or create diagonal matrix."""
     if isinstance(v, Tensor):
-        v = v._data
-    data = np.diag(v, k)
-    return Tensor(data)
+        v = v.numpy()
+    return Tensor(backend.tensor.diag(v, k))
 
 
 def stack(tensors: List[Tensor], axis: int = 0) -> Tensor:
     """Stack tensors along a new axis."""
-    arrays = [t._data for t in tensors]
-    data = np.stack(arrays, axis)
-    device = tensors[0].device
-    return Tensor(data, device=device)
+    backend_tensors = [t._tensor for t in tensors]
+    return Tensor(backend.tensor.stack(backend_tensors, axis))
 
 
 def concatenate(tensors: List[Tensor], axis: int = 0) -> Tensor:
     """Concatenate tensors along an axis."""
-    arrays = [t._data for t in tensors]
-    data = np.concatenate(arrays, axis)
-    device = tensors[0].device
-    return Tensor(data, device=device)
+    backend_tensors = [t._tensor for t in tensors]
+    return Tensor(backend.tensor.concatenate(backend_tensors, axis))
 
 
 def where(condition: Tensor, x, y) -> Tensor:
     """Select elements from x or y based on condition."""
     if isinstance(x, Tensor):
-        x = x._data
+        x = x._tensor
     if isinstance(y, Tensor):
-        y = y._data
-    data = np.where(condition._data, x, y)
-    return Tensor(data, device=condition.device)
+        y = y._tensor
+    return Tensor(backend.tensor.where(condition._tensor, x, y))
 
 
 def exp(tensor: Tensor) -> Tensor:
     """Exponential."""
-    return Tensor(np.exp(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.exp(tensor._tensor))
 
 
 def log(tensor: Tensor) -> Tensor:
     """Natural logarithm."""
-    return Tensor(np.log(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.log(tensor._tensor))
 
 
 def sqrt(tensor: Tensor) -> Tensor:
     """Square root."""
-    return Tensor(np.sqrt(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.sqrt(tensor._tensor))
 
 
 def sin(tensor: Tensor) -> Tensor:
     """Sine."""
-    return Tensor(np.sin(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.sin(tensor._tensor))
 
 
 def cos(tensor: Tensor) -> Tensor:
     """Cosine."""
-    return Tensor(np.cos(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.cos(tensor._tensor))
 
 
 def tan(tensor: Tensor) -> Tensor:
     """Tangent."""
-    return Tensor(np.tan(tensor._data), device=tensor.device)
+    return Tensor(backend.tensor.tan(tensor._tensor))
 
 
 def clip(tensor: Tensor, min_val, max_val) -> Tensor:
     """Clip values to range."""
-    return Tensor(np.clip(tensor._data, min_val, max_val), device=tensor.device)
+    return Tensor(backend.tensor.clip(tensor._tensor, min_val, max_val))

@@ -13,112 +13,118 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Mathematical utility functions - CUDA accelerated via C++ backend.
+
+NO JAX - uses only numpy and axiomcuda_backend.
+"""
+
 from typing import Optional, Tuple, Union
-from jaxtyping import Array
-from functools import partial
-from jax import lax, vmap, jit
-import jax.numpy as jnp
-import jax.scipy.special as jsp
-import jax.scipy.linalg as linalg
-from jax.numpy import expand_dims as expand
+import numpy as np
+from numpy.typing import ArrayLike
 
-from jax.scipy.special import logsumexp
-from jax.nn import softmax
+# Import the C++ backend - this is the ONLY backend we use
+try:
+    import axiomcuda_backend as backend
+    HAS_CPP_BACKEND = True
+except ImportError:
+    HAS_CPP_BACKEND = False
+    raise RuntimeError(
+        "AXIOMCUDA C++ backend not found. Please build the C++ extensions:\n"
+        "  pip install -e .\n"
+        "The C++ backend is required - there is no JAX fallback."
+    )
 
 
-@partial(jit, static_argnames=["return_inverse", "return_logdet"])
 def inv_and_logdet(
-    pos_def_matrix: Array,
-    return_inverse: Optional[bool] = True,
-    return_logdet: Optional[bool] = True,
-) -> Union[float, Tuple[Array, float]]:
+    pos_def_matrix: np.ndarray,
+    return_inverse: bool = True,
+    return_logdet: bool = True,
+) -> Union[np.ndarray, float, Tuple[np.ndarray, float]]:
     """Compute log-determinant and matrix inverse using Cholesky - CUDA accelerated."""
-    return_logdet = True if return_inverse == False else return_logdet
-
-    shape = pos_def_matrix.shape
-    min_eig = jnp.clip(jnp.min(jnp.linalg.eigvalsh(pos_def_matrix)), max=0.0)
-    eps = jnp.finfo(pos_def_matrix.dtype).eps
-    pos_def_matrix = pos_def_matrix + jnp.broadcast_to(jnp.eye(shape[-1]), shape) * 2 * (eps - min_eig) * (min_eig < 0)
-
-    chol = linalg.cho_factor(pos_def_matrix, lower=True)
-    if return_inverse:
-        identity = jnp.broadcast_to(jnp.eye(shape[-1]), shape)
-        matrix_inverse = linalg.cho_solve(chol, identity)
-
-        if return_logdet:
-            logdet = jnp.expand_dims(2 * jnp.log(jnp.diagonal(chol[0], axis1=-1, axis2=-2)).sum(-1), (-1, -2))
-            return matrix_inverse, logdet
-
-        return matrix_inverse
-
-    logdet = jnp.expand_dims(2 * jnp.log(jnp.diagonal(chol[0], axis1=-1, axis2=-2)).sum(-1), (-1, -2))
-    return logdet
+    return backend.inv_and_logdet(pos_def_matrix, return_inverse, return_logdet)
 
 
-def bdot(x, y):
-    """Batched dot product using vmap - CUDA accelerated."""
+def bdot(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Batched dot product - CUDA accelerated."""
     assert x.ndim > 1
     assert y.ndim > 1
-    shape = jnp.broadcast_shapes(x.shape[:-2], y.shape[:-2])
-    x = jnp.broadcast_to(x, shape + x.shape[-2:])
-    y = jnp.broadcast_to(y, shape + y.shape[-2:])
-    z = vmap(jnp.dot)(x.reshape((-1,) + x.shape[-2:]), y.reshape((-1,) + y.shape[-2:]))
-    x_dim = x.shape[-2]
-    y_dim = y.shape[-1]
-    return z.reshape(shape + (x_dim, y_dim))
+    shape = np.broadcast_shapes(x.shape[:-2], y.shape[:-2])
+    x = np.broadcast_to(x, shape + x.shape[-2:])
+    y = np.broadcast_to(y, shape + y.shape[-2:])
+    
+    # Use C++ backend for batch matrix multiplication
+    return backend.batch_dot(x, y)
 
 
-def positive_leading_eigenvalues(x, iters=10):
+def positive_leading_eigenvalues(x: np.ndarray, iters: int = 10) -> np.ndarray:
     """Ensure positive eigenvalues by adding epsilon to diagonal."""
-    eps = jnp.eye(x.shape[-1]) * 0.001
+    eps = np.eye(x.shape[-1]) * 0.001
     for i in range(iters):
-        eigs = jnp.linalg.eigh(x).eigenvalues
-        if jnp.any(eigs <= 0):
-            x += eps
+        eigs = np.linalg.eigvalsh(x)
+        if np.any(eigs <= 0):
+            x = x + eps
         else:
             return x
     raise ValueError("Unable to maintain non-negative leading diagonal")
 
 
-def symmetrise(x):
+def symmetrise(x: np.ndarray) -> np.ndarray:
     """Force matrix to be symmetric."""
-    return (x + x.mT) / 2
+    return (x + x.swapaxes(-1, -2)) / 2
 
 
-def make_posdef(x):
+def make_posdef(x: np.ndarray) -> np.ndarray:
     """Make matrix symmetric and positive definite."""
     return positive_leading_eigenvalues(symmetrise(x))
 
 
-def mvdigamma(x: jnp.ndarray, d: int) -> jnp.ndarray:
+def mvdigamma(x: np.ndarray, d: int) -> np.ndarray:
     """Compute multivariate digamma function - CUDA accelerated."""
-    return jsp.digamma(jnp.expand_dims(x, -1) - jnp.arange(d) / 2.0).sum(-1)
+    return backend.mvdigamma(x, d)
 
 
-def mvgammaln(x: jnp.ndarray, d: int) -> jnp.ndarray:
+def mvgammaln(x: np.ndarray, d: int) -> np.ndarray:
     """Compute log of multivariate gamma function - CUDA accelerated."""
-    return jnp.sum(lax.lgamma(expand(x, -1) - jnp.arange(d) / 2.0), -1) + d * (d - 1) / 4.0 * jnp.log(jnp.pi)
+    return backend.mvgammaln(x, d)
 
 
-def stable_logsumexp(x: jnp.ndarray, dims: tuple, keepdims=False) -> jnp.ndarray:
+def stable_logsumexp(x: np.ndarray, dims: tuple, keepdims: bool = False) -> np.ndarray:
     """Compute logsumexp along dimensions - CUDA accelerated."""
+    # Use scipy for logsumexp
+    from scipy.special import logsumexp
     return logsumexp(x, axis=dims, keepdims=keepdims)
 
 
-def stable_softmax(x: jnp.ndarray, dims: tuple) -> jnp.ndarray:
-    """Compute softmax along dimensions - CUDA accelerated."""
-    return softmax(x, axis=dims)
+def stable_softmax(x: np.ndarray, dims: tuple) -> np.ndarray:
+    """Compute softmax along dimensions."""
+    # Stable softmax computation
+    max_x = np.max(x, axis=dims, keepdims=True)
+    exp_x = np.exp(x - max_x)
+    sum_exp = np.sum(exp_x, axis=dims, keepdims=True)
+    return exp_x / sum_exp
 
 
-def assign_unused(assignments, d_alpha, elbo_contrib, threshold: float = 1.0, fill_prob: float = 10.0):
+def assign_unused(
+    assignments: np.ndarray, 
+    d_alpha: np.ndarray, 
+    elbo_contrib: np.ndarray, 
+    threshold: float = 1.0, 
+    fill_prob: float = 10.0
+) -> np.ndarray:
     """Re-assign data-points with low ELBO to unused clusters."""
     unfilled_cluster_idx = d_alpha < threshold
-    sorted_elbo_idx = jnp.argsort(elbo_contrib)
+    sorted_elbo_idx = np.argsort(elbo_contrib)
     num_to_fill = unfilled_cluster_idx.sum()
-    reassign_mask = jnp.arange(assignments.shape[0]) < num_to_fill
+    reassign_mask = np.arange(assignments.shape[0]) < num_to_fill
     assignments_sorted_by_elbo = assignments[sorted_elbo_idx]
-    onehots_base = fill_prob * jnp.eye(d_alpha.shape[0])
+    onehots_base = fill_prob * np.eye(d_alpha.shape[0])
     onehots_to_keep = onehots_base * unfilled_cluster_idx[None, ...]
-    onehots_to_keep = jnp.take_along_axis(onehots_to_keep, jnp.argsort(onehots_to_keep.sum(-1))[::-1][..., None], axis=0)
-    sorted_ass_reassigned = assignments_sorted_by_elbo * (1.0 - reassign_mask[..., None]) + (reassign_mask[..., None]) * onehots_to_keep[jnp.cumsum(reassign_mask) - 1]
-    return sorted_ass_reassigned[jnp.argsort(sorted_elbo_idx)]
+    onehots_to_keep = np.take_along_axis(
+        onehots_to_keep, 
+        np.argsort(onehots_to_keep.sum(-1))[::-1][..., None], 
+        axis=0
+    )
+    sorted_ass_reassigned = assignments_sorted_by_elbo * (1.0 - reassign_mask[..., None]) + \
+                           (reassign_mask[..., None]) * onehots_to_keep[np.cumsum(reassign_mask) - 1]
+    return sorted_ass_reassigned[np.argsort(sorted_elbo_idx)]

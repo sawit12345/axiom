@@ -14,10 +14,9 @@
 # limitations under the License.
 
 """
-Device management for AxiomCUDA.
+Device management for AxiomCUDA using C++ backend.
 
-Provides GPU/CPU selection, CUDA auto-detection, memory management,
-and device context managers.
+Provides GPU/CPU selection and CUDA management via the C++ backend.
 """
 
 import os
@@ -25,14 +24,7 @@ import warnings
 from contextlib import contextmanager
 from typing import Optional, Union
 import numpy as np
-
-# Try to import CUDA bindings
-try:
-    import ctypes
-    _cuda_lib = ctypes.CDLL('libcudart.so')
-    _CUDA_AVAILABLE = True
-except (OSError, ImportError):
-    _CUDA_AVAILABLE = False
+import axiomcuda_backend as backend
 
 
 def cuda_available() -> bool:
@@ -41,7 +33,7 @@ def cuda_available() -> bool:
     Returns:
         True if CUDA runtime is available, False otherwise
     """
-    return _CUDA_AVAILABLE
+    return backend.cuda_available()
 
 
 def _get_gpu_memory_info(device_id: int = 0) -> tuple:
@@ -53,13 +45,12 @@ def _get_gpu_memory_info(device_id: int = 0) -> tuple:
     Returns:
         Tuple of (free_memory, total_memory) in bytes
     """
-    if not _CUDA_AVAILABLE:
+    if not cuda_available():
         return (0, 0)
     
     try:
-        # This would be replaced with actual CUDA calls
-        # For now, return dummy values
-        return (8 * 1024**3, 16 * 1024**3)  # 8GB free, 16GB total
+        info = backend.device.get_memory_info(device_id)
+        return (info['free'], info['total'])
     except:
         return (0, 0)
 
@@ -68,7 +59,7 @@ class Device:
     """Device abstraction for GPU/CPU tensor operations.
     
     This class provides a unified interface for managing device placement
-    and memory for both CPU and GPU tensors.
+    using the C++ backend.
     
     Attributes:
         type: Device type ('cpu' or 'cuda')
@@ -97,7 +88,7 @@ class Device:
         if device_type not in ('cpu', 'cuda'):
             raise ValueError(f"Device type must be 'cpu' or 'cuda', got {device_type}")
         
-        if device_type == 'cuda' and not _CUDA_AVAILABLE:
+        if device_type == 'cuda' and not cuda_available():
             warnings.warn("CUDA requested but not available, falling back to CPU")
             device_type = 'cpu'
         
@@ -167,15 +158,17 @@ class Device:
     
     def empty_cache(self) -> None:
         """Empty the device cache to free memory."""
-        if self._type == 'cuda' and _CUDA_AVAILABLE:
-            # Call CUDA runtime to empty cache
-            pass  # Implementation would call actual CUDA function
+        if self._type == 'cuda' and cuda_available():
+            # Call C++ backend to empty cache
+            try:
+                backend.device.empty_cache(self._id)
+            except:
+                pass
     
     def synchronize(self) -> None:
         """Synchronize device operations."""
-        if self._type == 'cuda' and _CUDA_AVAILABLE:
-            # Call CUDA synchronize
-            pass  # Implementation would call actual CUDA function
+        if self._type == 'cuda' and cuda_available():
+            backend.device.synchronize(self._id)
     
     def to(self, array: np.ndarray) -> 'Tensor':
         """Move a numpy array to this device.
@@ -306,7 +299,7 @@ def clear_memory(device: Union[str, Device, None] = None) -> None:
         gc.collect()
 
 
-# CUDA utility functions
+# CUDA utility functions using C++ backend
 
 def cuda_device_count() -> int:
     """Get the number of CUDA devices available.
@@ -314,14 +307,9 @@ def cuda_device_count() -> int:
     Returns:
         Number of CUDA devices (0 if CUDA not available)
     """
-    if not _CUDA_AVAILABLE:
+    if not cuda_available():
         return 0
-    
-    try:
-        # Would call actual CUDA function
-        return 1  # Placeholder
-    except:
-        return 0
+    return backend.device.get_device_count()
 
 
 def cuda_get_device_name(device_id: int = 0) -> str:
@@ -333,14 +321,14 @@ def cuda_get_device_name(device_id: int = 0) -> str:
     Returns:
         Device name string
     """
-    if not _CUDA_AVAILABLE:
+    if not cuda_available():
         return "No CUDA available"
     
     try:
-        # Would call actual CUDA function
-        return f"CUDA Device {device_id}"
+        props = backend.device.get_device_properties(device_id)
+        return props.name
     except:
-        return "Unknown"
+        return f"CUDA Device {device_id}"
 
 
 def cuda_get_capability(device_id: int = 0) -> tuple:
@@ -352,12 +340,12 @@ def cuda_get_capability(device_id: int = 0) -> tuple:
     Returns:
         Tuple of (major, minor) compute capability
     """
-    if not _CUDA_AVAILABLE:
+    if not cuda_available():
         return (0, 0)
     
     try:
-        # Would call actual CUDA function
-        return (7, 5)  # Placeholder
+        props = backend.device.get_device_properties(device_id)
+        return (props.major, props.minor)
     except:
         return (0, 0)
 

@@ -15,26 +15,32 @@
 
 import inspect
 from typing import Optional, Union, Tuple
+import numpy as np
 
-import jax.numpy as jnp
-import jax.tree_util as jtu
-from jax.tree_util import register_pytree_node
-from jaxtyping import Array
+from axiomcuda.vi.utils import ArrayDict
 
-from numpy.core.numeric import normalize_axis_tuple
-
-from axiomcuda.vi import ArrayDict, utils
+# Import the C++ backend - this is the ONLY backend we use
+try:
+    import axiomcuda_backend as backend
+    HAS_CPP_BACKEND = True
+except ImportError:
+    HAS_CPP_BACKEND = False
+    raise RuntimeError(
+        "AXIOMCUDA C++ backend not found. Please build the C++ extensions:\n"
+        "  pip install -e .\n"
+        "The C++ backend is required - there is no JAX fallback."
+    )
 
 
 class Distribution:
-    """Base class for probability distributions - CUDA accelerated version"""
+    """Base class for probability distributions - CUDA accelerated version."""
 
     dim: int
     event_dim: int
     batch_dim: int
     default_event_dim: int
-    event_shape: tuple[int]
-    batch_shape: tuple[int]
+    event_shape: tuple[int, ...]
+    batch_shape: tuple[int, ...]
     pytree_data_fields = ()
     pytree_aux_fields = (
         "dim",
@@ -53,18 +59,12 @@ class Distribution:
         self.default_event_dim = default_event_dim
         self.dim = self.event_shape[-default_event_dim] if len(self.event_shape) > 0 else 0
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
-
     @property
     def shape(self):
         return self.batch_shape + self.event_shape
 
     def to_event(self, n: int) -> "Distribution":
-        """
-        Converts the distribution to an event distribution.
-        """
+        """Converts the distribution to an event distribution."""
         if n > 0:
             event_shape = self.batch_shape[-n:] + self.event_shape
             batch_shape = self.batch_shape[:-n]
@@ -74,73 +74,53 @@ class Distribution:
 
         return self.__class__(self.default_event_dim, batch_shape, event_shape)
 
-    def get_sample_dims(self, data: jnp.ndarray) -> list[int]:
-        """
-        Returns the sample dimensions of the data.
-        """
+    def get_sample_dims(self, data: np.ndarray) -> list[int]:
+        """Returns the sample dimensions of the data."""
         sample_shape = self.get_sample_shape(data)
         return list(range(len(sample_shape)))
 
-    def get_sample_shape(self, data: jnp.ndarray) -> tuple[int]:
-        """
-        Returns the sample shape of the data.
-        """
+    def get_sample_shape(self, data: np.ndarray) -> tuple[int, ...]:
+        """Returns the sample shape of the data."""
         return data.shape[: -self.event_dim - self.batch_dim]
 
-    def get_batch_shape(self, data: jnp.ndarray) -> tuple[int]:
-        """
-        Returns the batch shape of the data.
-        """
+    def get_batch_shape(self, data: np.ndarray) -> tuple[int, ...]:
+        """Returns the batch shape of the data."""
         return data.shape[-self.event_dim - self.batch_dim : -self.event_dim]
 
     def get_event_dims(self) -> list[int]:
-        """
-        Return the event dimensions of the array.
-        """
+        """Return the event dimensions of the array."""
         return list(range(-self.event_dim, 0))
 
-    def sum_events(self, x: jnp.ndarray, keepdims: bool = False) -> jnp.ndarray:
-        """
-        Sums over the event dimensions of the array.
-        """
-        return x.sum(range(-self.event_dim, 0), keepdims=keepdims)
+    def sum_events(self, x: np.ndarray, keepdims: bool = False) -> np.ndarray:
+        """Sums over the event dimensions of the array."""
+        return x.sum(axis=tuple(range(-self.event_dim, 0)), keepdims=keepdims)
 
-    def sum_default_events(self, x: jnp.ndarray, keepdims: bool = False) -> jnp.ndarray:
-        """
-        Sums over the default event dimensions of the array.
-        """
-        return x.sum(range(-self.default_event_dim, 0), keepdims=keepdims)
+    def sum_default_events(self, x: np.ndarray, keepdims: bool = False) -> np.ndarray:
+        """Sums over the default event dimensions of the array."""
+        return x.sum(axis=tuple(range(-self.default_event_dim, 0)), keepdims=keepdims)
 
-    def expand_event_dims(self, x: jnp.ndarray) -> jnp.ndarray:
-        """
-        Adds event dimensions to the array.
-        """
+    def expand_event_dims(self, x: np.ndarray) -> np.ndarray:
+        """Adds event dimensions to the array."""
         return x.reshape(x.shape + (1,) * self.event_dim)
 
-    def expand_default_event_dims(self, x: jnp.ndarray) -> jnp.ndarray:
-        """
-        Adds event dimensions to the array.
-        """
+    def expand_default_event_dims(self, x: np.ndarray) -> np.ndarray:
+        """Adds event dimensions to the array."""
         return x.reshape(x.shape + (1,) * self.default_event_dim)
 
-    def expand_batch_dims(self, x: jnp.ndarray) -> jnp.ndarray:
-        """
-        Adds batch dimensions to the array.
-        """
+    def expand_batch_dims(self, x: np.ndarray) -> np.ndarray:
+        """Adds batch dimensions to the array."""
         return x.reshape(x.shape[: -self.event_dim] + (1,) * self.batch_dim + x.shape[-self.event_dim :])
 
     def expand_batch_shape(self, batch_relative_axes: Union[int, Tuple[int]]):
-        """
-        Returns a new Distribution object with the expanded batch shape.
-        """
+        """Returns a new Distribution object with the expanded batch shape."""
         batch_relative_axes = (batch_relative_axes,) if isinstance(batch_relative_axes, int) else batch_relative_axes
 
         def expand_if_possible(x, batch_dim, event_dim, batch_ax, abs_ax):
-            if isinstance(x, Array):
+            if isinstance(x, np.ndarray):
                 if x.ndim == batch_dim + event_dim:
-                    return jnp.expand_dims(x, abs_ax)
+                    return np.expand_dims(x, abs_ax)
                 if x.ndim == batch_dim:
-                    return jnp.expand_dims(x, batch_ax)
+                    return np.expand_dims(x, batch_ax)
             return x
 
         absolute_axes = tuple([ax - self.event_dim if ax < 0 else ax for ax in batch_relative_axes])
@@ -151,17 +131,17 @@ class Distribution:
             if isinstance(leaf, Distribution):
                 exp_leaf = leaf.expand_batch_shape(batch_relative_axes)
             elif isinstance(leaf, ArrayDict):
-                exp_leaf = jtu.tree_map(
-                    lambda x: expand_if_possible(x, self.batch_dim, self.event_dim, batch_relative_axes, absolute_axes),
-                    leaf,
-                )
+                exp_leaf = ArrayDict(**{
+                    k: expand_if_possible(v, self.batch_dim, self.event_dim, batch_relative_axes, absolute_axes)
+                    for k, v in leaf.items()
+                })
             else:
                 exp_leaf = expand_if_possible(leaf, self.batch_dim, self.event_dim, batch_relative_axes, absolute_axes)
 
             expanded_data_fields.append(exp_leaf)
 
         new_batch_dim = len(batch_relative_axes) + self.batch_dim
-        adjusted_axes = normalize_axis_tuple(batch_relative_axes, new_batch_dim)
+        adjusted_axes = tuple(sorted(set(batch_relative_axes)))
 
         shape_it = iter(self.batch_shape)
         new_batch_shape = [1 if ax in adjusted_axes else next(shape_it) for ax in range(new_batch_dim)]
@@ -172,23 +152,22 @@ class Distribution:
         return unsqueezed_dist
 
     def swap_axes(self, axis1: int, axis2: int):
-        """
-        Swaps the axes of the component distributions of a Pytree.
-        """
+        """Swaps the axes of the component distributions of a Pytree."""
         def swap_axes_of_leaf(x, ax1, ax2):
-            if isinstance(x, Array):
+            if isinstance(x, np.ndarray):
                 if x.ndim >= self.batch_dim + self.event_dim:
-                    return jnp.swapaxes(x, ax1, ax2)
+                    return np.swapaxes(x, ax1, ax2)
                 elif x.ndim > 1 and x.ndim >= self.batch_dim:
                     ax1 = ax1 + self.event_dim if ax1 < 0 else ax1
                     ax2 = ax2 + self.event_dim if ax2 < 0 else ax2
-                    return jnp.swapaxes(x, ax1, ax2)
+                    return np.swapaxes(x, ax1, ax2)
                 else:
                     return x
             return x
 
         data_fields, aux_fields = self.tree_flatten()
-        data_fields = jtu.tree_map(lambda x: swap_axes_of_leaf(x, axis1, axis2), data_fields)
+        from axiomcuda.vi.utils import tree_map
+        data_fields = tree_map(lambda x: swap_axes_of_leaf(x, axis1, axis2), data_fields)
 
         axis1 = axis1 + self.event_dim if axis1 < 0 else axis1
         axis2 = axis2 + self.event_dim if axis2 < 0 else axis2
@@ -204,45 +183,38 @@ class Distribution:
         return swapped_dist
 
     def moveaxis(self, source: int, destination: int):
-        """
-        Moves one batch axis of the component distributions to another position.
-        """
+        """Moves one batch axis of the component distributions to another position."""
         absolute_src = source - self.event_dim if source < 0 else source
         absolute_dest = destination - self.event_dim if destination < 0 else destination
 
         def moveaxis_of_leaf(x, src_batch, dest_batch, src_abs, dest_abs):
-            if isinstance(x, Array):
+            if isinstance(x, np.ndarray):
                 if x.ndim == self.batch_dim + self.event_dim:
-                    return jnp.moveaxis(x, src_abs, dest_abs)
+                    return np.moveaxis(x, src_abs, dest_abs)
                 elif x.ndim == self.batch_dim:
-                    return jnp.moveaxis(x, src_batch, dest_batch)
+                    return np.moveaxis(x, src_batch, dest_batch)
             return x
 
         data_fields, aux_fields = self.tree_flatten()
-        data_fields = jtu.tree_map(
+        from axiomcuda.vi.utils import tree_map
+        data_fields = tree_map(
             lambda x: moveaxis_of_leaf(x, source, destination, absolute_src, absolute_dest), data_fields
         )
 
-        source = normalize_axis_tuple(source, self.batch_dim, "source")[0]
-        destination = normalize_axis_tuple(destination, self.batch_dim, "destination")[0]
-
-        batch_shape_list = [dim for n, dim in enumerate(self.batch_shape) if n != source]
-        batch_shape_list.insert(destination, self.batch_shape[source])
+        batch_shape_list = [dim for n, dim in enumerate(self.batch_shape) if n != absolute_src]
+        batch_shape_list.insert(absolute_dest, self.batch_shape[absolute_src])
 
         replace = {"batch_shape": tuple(batch_shape_list)}
         moved_dist = self.tree_unflatten_and_replace(aux_fields, data_fields, replace)
         return moved_dist
 
     def copy(self):
-        """
-        Returns a copy of the distribution.
-        """
-        return utils.tree_copy(self)
+        """Returns a copy of the distribution."""
+        from axiomcuda.vi.utils import tree_copy
+        return tree_copy(self)
 
-    def infer_shapes(self, tensor: jnp.ndarray, event_dim: int) -> tuple[int, int]:
-        """
-        Infers the batch and event shapes from the tensor.
-        """
+    def infer_shapes(self, tensor: np.ndarray, event_dim: int) -> tuple[tuple, tuple]:
+        """Infers the batch and event shapes from the tensor."""
         batch_shape = tensor.shape[:-event_dim]
         event_shape = tensor.shape[-event_dim:]
         return batch_shape, event_shape
@@ -309,33 +281,35 @@ class Distribution:
         return instance
 
     def __hash__(self):
-        return hash(tuple(jtu.tree_leaves(self)))
+        from axiomcuda.vi.utils import tree_leaves
+        return hash(tuple(tree_leaves(self)))
 
     def __eq__(self, other):
-        return utils.tree_equal(self, other)
+        from axiomcuda.vi.utils import tree_equal
+        return tree_equal(self, other)
 
 
 DEFAULT_EVENT_DIM = 1
 
 
 class Delta(Distribution):
-    """Dirac delta distribution - CUDA accelerated"""
+    """Dirac delta distribution - CUDA accelerated."""
 
     pytree_data_fields = ("values", "residual")
 
-    def __init__(self, values: Array, event_dim: Optional[int] = DEFAULT_EVENT_DIM):
+    def __init__(self, values: np.ndarray, event_dim: Optional[int] = DEFAULT_EVENT_DIM):
         batch_shape, event_shape = values.shape[:-event_dim], values.shape[-event_dim:]
         super().__init__(DEFAULT_EVENT_DIM, batch_shape, event_shape)
         self.values = values
-        self.residual = jnp.zeros(batch_shape)
+        self.residual = np.zeros(batch_shape)
 
     @property
-    def p(self) -> jnp.ndarray:
+    def p(self) -> np.ndarray:
         """Returns values."""
         return self.values
 
     @property
-    def mean(self) -> jnp.ndarray:
+    def mean(self) -> np.ndarray:
         """Returns the mean parameter (alias for `p`)"""
         return self.p
 
@@ -343,13 +317,13 @@ class Delta(Distribution):
         return self.p
 
     def expected_xx(self):
-        return self.p * self.p.mT
+        return self.p @ self.p.T
 
     def log_partition(self):
-        return jnp.zeros(len(self.event_shape) * (1,))
+        return np.zeros((1,) * len(self.event_shape))
 
     def entropy(self):
-        return jnp.zeros(len(self.event_shape) * (1,))
+        return np.zeros((1,) * len(self.event_shape))
 
     def __mul__(self, other):
         """Overloads the * operator - Delta distributions cannot be multiplied."""

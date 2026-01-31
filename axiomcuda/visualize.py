@@ -13,20 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Visualization utilities for axiomcuda - plotting RMM, IMM, SMM, TMM states."""
+"""Visualization utilities for axiomcuda - using numpy only, C++ backend for models."""
 
 import io
 
-import jax
-import jax.numpy as jnp
+import numpy as np
 
 import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Ellipse
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-import numpy as np
 
 from scipy.stats import norm
 
@@ -44,7 +42,7 @@ def fig2img(fig):
         Numpy array of shape (height, width, 3)
     """
     with io.BytesIO() as buff:
-        fig.savefig(buff, facecolor="white", format="raw")
+        fig.savefig(buff, facecolor="white", format='raw')
         buff.seek(0)
         data = np.frombuffer(buff.getvalue(), dtype=np.uint8)
     w, h = fig.canvas.get_width_height()
@@ -66,17 +64,18 @@ def draw_ellipse(position, covariance, ax=None, nsigs=None, **kwargs):
     ax = ax or plt.gca()
 
     if covariance.shape == (2, 2):
-        U, s, Vt = jnp.linalg.svd(covariance)
-        angle = jnp.degrees(jnp.arctan2(U[1, 0], U[0, 0]))
-        width, height = 2 * jnp.sqrt(s)
+        U, s, Vt = np.linalg.svd(covariance)
+        angle = np.degrees(np.arctan2(U[1, 0], U[0, 0]))
+        width, height = 2 * np.sqrt(s)
     else:
         angle = 0
-        width, height = 2 * jnp.sqrt(covariance)
+        width, height = 2 * np.sqrt(covariance)
 
     kwargs["angle"] = angle
     kwargs["edgecolor"] = "black"
     kwargs["facecolor"] = kwargs.get("color", None)
-    del kwargs["color"]
+    if "color" in kwargs:
+        del kwargs["color"]
     if nsigs is None:
         nsigs = list(range(1, 4))
 
@@ -99,10 +98,20 @@ def draw_ellipses(means, covars, ax=None, nsigs=None, zorder=1, scatter=True, **
     ax = ax or plt.gca()
     nsig = nsigs or range(1, 4)
 
-    U, s, Vt = jax.vmap(jnp.linalg.svd)(covars)
-    vals = 2 * jax.vmap(jnp.sqrt)(s)
+    # Compute SVD for all covariances using numpy
+    U_list, s_list, Vt_list = [], [], []
+    for cov in covars:
+        U, s, Vt = np.linalg.svd(cov)
+        U_list.append(U)
+        s_list.append(s)
+        Vt_list.append(Vt)
+    
+    U = np.array(U_list)
+    s = np.array(s_list)
+    
+    vals = 2 * np.sqrt(s)
     widths, heights = vals[:, 0], vals[:, 1]
-    angles = jax.vmap(lambda u: jnp.degrees(jnp.arctan2(u[1, 0], u[0, 0])))(U)
+    angles = np.array([np.degrees(np.arctan2(u[1, 0], u[0, 0])) for u in U])
 
     colors = kwargs.get("colors", [None] * means.shape[0])
 
@@ -164,9 +173,9 @@ def transform_mvn(scale, offset, mean, cova):
     Returns:
         (new_mean, new_cova): Transformed parameters
     """
-    A = jnp.diag(scale)
+    A = np.diag(scale)
     new_mean = A.dot(mean) + offset
-    new_cova = jnp.dot(A, jnp.dot(cova, A.T))
+    new_cova = np.dot(A, np.dot(cova, A.T))
     return new_mean, new_cova
 
 
@@ -224,29 +233,30 @@ def plot_rmm(
     edgecolors = None
     if colorize == "switch":
         sw = rmm.model.discrete_likelihoods[4].mean()[indices, ..., 0]
-        colors = sw.argmax(-1)
-        colors = colors / colors.max()
+        colors = np.argmax(sw, axis=-1)
+        colors = colors / colors.max() if colors.max() > 0 else colors
         colors = tab20(colors)
     elif colorize == "reward":
         rw = rmm.model.discrete_likelihoods[3].mean()[indices, ..., 0]
-        rw = rw.argmax(-1) / rw.shape[-1]
+        rw = np.argmax(rw, axis=-1) / rw.shape[-1] if rw.shape[-1] > 0 else rw
         c = {
             -1: (1, 0, 0),  # Red
             0: (1, 1, 0),  # Yellow
             1: (0, 1, 0),  # Green
         }
-        cmap = LinearSegmentedColormap.from_list("custom_cmap", [c[-1], c[0], c[1]])
-        colors = cmap(rw)
+        cmap_custom = LinearSegmentedColormap.from_list("custom_cmap", [c[-1], c[0], c[1]])
+        colors = cmap_custom(rw)
     elif colorize == "cluster":
-        identities = (
-            rmm.model.discrete_likelihoods[0].mean()[indices, ..., 0].argmax(-1)
+        identities = np.argmax(
+            rmm.model.discrete_likelihoods[0].mean()[indices, ..., 0], axis=-1
         )
 
-        interact_identities = (
-            rmm.model.discrete_likelihoods[1].mean()[indices, ..., 0].argmax(-1)
+        interact_identities = np.argmax(
+            rmm.model.discrete_likelihoods[1].mean()[indices, ..., 0], axis=-1
         )
-        colors = (
-            (
+        
+        if imm is not None:
+            colors = (
                 (
                     imm.model.continuous_likelihood.mean[
                         identities, (2 - 2 * int(color_only_identity)) :, 0
@@ -256,12 +266,9 @@ def plot_rmm(
                 * 0.5
                 + 0.5
             )
-            .clip(0, 1)
-            .tolist()
-        )
+            colors = np.clip(colors, 0, 1).tolist()
 
-        edgecolors = (
-            (
+            edgecolors = (
                 (
                     imm.model.continuous_likelihood.mean[
                         interact_identities, (2 - 2 * int(color_only_identity)) :, 0
@@ -271,15 +278,16 @@ def plot_rmm(
                 * 0.5
                 + 0.5
             )
-            .clip(0, 1)
-            .tolist()
-        )
+            edgecolors = np.clip(edgecolors, 0, 1).tolist()
+        else:
+            colors = tab20(identities % 20)
+            edgecolors = tab20(interact_identities % 20)
     elif colorize == "infogain":
         ig = 1 / rmm.model.prior.alpha - 1 / rmm.model.prior.alpha.sum()
         ig = ig[indices]
         colors = cmap(ig)
     else:
-        colors = cmap(jnp.ones(mu.shape[0]))
+        colors = cmap(np.ones(mu.shape[0]))
 
     draw_ellipses(
         mu,
@@ -295,11 +303,12 @@ def plot_rmm(
 
     if highlight_idcs is not None:
         for j, highlight_idx in enumerate(highlight_idcs):
-            i = jnp.where(indices == highlight_idx)[0]
-            if len(i) > 0:
-                i = i[0]
+            idx_match = np.where(indices)[0]
+            match_positions = np.where(idx_match == highlight_idx)[0]
+            if len(match_positions) > 0:
+                i = match_positions[0]
                 draw_ellipses(
-                    mu[i : i + 1, :2, 0],
+                    mu[i : i + 1],
                     si[i : i + 1],
                     ax,
                     alpha=0.10,
@@ -345,8 +354,11 @@ def plot_identity_model(imm, return_ax=False, color_only_identity=False):
             n_cols = int(np.ceil(num_object_types / n_rows))
 
     fig, ax = plt.subplots(n_rows, n_cols)
+    if num_object_types == 1:
+        ax = np.array([ax])
+    ax_flat = ax.flatten() if hasattr(ax, 'flatten') else [ax]
 
-    for object_label, a in enumerate(ax.flatten()[:num_object_types]):
+    for object_label, a in enumerate(ax_flat[:num_object_types]):
         if not color_only_identity:
             width, height = imm.model.continuous_likelihood.mean[object_label, :2, 0]
             co = (
@@ -363,7 +375,7 @@ def plot_identity_model(imm, return_ax=False, color_only_identity=False):
                 (0.0, 0.0),
                 width,
                 height,
-                facecolor=co.clip(0, 1).tolist(),
+                facecolor=np.clip(co, 0, 1).tolist(),
                 edgecolor="black",
             )
         )
@@ -374,7 +386,7 @@ def plot_identity_model(imm, return_ax=False, color_only_identity=False):
         a.set_yticks([])
 
     # Hide unused subplots
-    for a in ax.flatten()[num_object_types:]:
+    for a in ax_flat[num_object_types:]:
         a.axis("off")
 
     plt.suptitle("Learned shapes")
@@ -400,29 +412,34 @@ def plot_smm(decoded_mu, decoded_sigma, offsets, stdevs, width, height, qz=None)
     Returns:
         Image array
     """
-    mu, cova = jax.vmap(
-        lambda mu, si: transform_mvn(
+    mu_list, cova_list = [], []
+    for mu, si in zip(decoded_mu, decoded_sigma):
+        new_mu, new_cova = transform_mvn(
             stdevs.flatten(),
             offsets.flatten(),
             mu,
             si,
         )
-    )(decoded_mu, decoded_sigma)
+        mu_list.append(new_mu)
+        cova_list.append(new_cova)
+    
+    mu = np.array(mu_list)
+    cova = np.array(cova_list)
 
-    pos, col = mu[..., :2], mu[..., 2:].clip(0, 255.0) / 255.0
+    pos, col = mu[..., :2], np.clip(mu[..., 2:], 0, 255.0) / 255.0
 
     # just pick the first 3 dims randomly as a color dim now
     if col.shape[-1] > 3:
-        col = col[..., :3].clip(0, 1)
+        col = np.clip(col[..., :3], 0, 1)
 
     cova = cova[..., :2, :2]
 
     if qz is not None:
-        assignments = qz[0, ...].argmax(-1)
+        assignments = np.argmax(qz[0, ...], axis=-1)
         heights = [(assignments == i).sum() for i in range(qz.shape[-1])]
-        indices = jnp.argwhere(jnp.asarray(heights) != 0)[:, 0]
+        indices = np.argwhere(np.array(heights) != 0)[:, 0]
     else:
-        indices = jnp.arange(cova.shape[0])
+        indices = np.arange(cova.shape[0])
 
     fig, ax = plt.subplots(figsize=((2.1 / height) * width, 2.1))
     for i in indices:
@@ -460,23 +477,21 @@ def plot_tmm(transitions, used_mask, width=160, height=210, return_ax=False):
     Returns:
         Image array or (fig, ax) tuple if return_ax=True
     """
-    fig, ax = plt.subplots(figsize=((8.4 / height) * width, 8.4))
-    
     n_components = transitions.shape[0]
     n_used = int(used_mask.sum())
     
     # Plot transition matrices as heatmaps
-    n_cols = min(5, n_used)
-    n_rows = int(np.ceil(n_used / n_cols))
+    n_cols = min(5, n_used) if n_used > 0 else 1
+    n_rows = int(np.ceil(n_used / n_cols)) if n_used > 0 else 1
     
     if n_used > 0:
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
         if n_rows == 1 and n_cols == 1:
-            axes = [[axes]]
+            axes = np.array([[axes]])
         elif n_rows == 1:
-            axes = [axes]
+            axes = np.array([axes])
         
-        used_indices = jnp.where(used_mask)[0]
+        used_indices = np.where(used_mask)[0]
         
         for idx, comp_idx in enumerate(used_indices):
             row = idx // n_cols
@@ -503,6 +518,10 @@ def plot_tmm(transitions, used_mask, width=160, height=210, return_ax=False):
         
         plt.suptitle('TMM Transition Components')
         plt.tight_layout()
+    else:
+        fig, ax = plt.subplots(figsize=((8.4 / height) * width, 8.4))
+        ax.text(0.5, 0.5, 'No used components', ha='center', va='center')
+        ax.axis('off')
     
     if return_ax:
         return fig, ax
@@ -524,7 +543,7 @@ def plot_plan(
     Visualizes the top-k planning rollouts on top of the observation.
     
     Args:
-        obs: RGB observation
+        obs: RGB observation (numpy array)
         plan_info: Planning information dictionary from planner
         tracked_obj_ids: Boolean array of tracked object indices
         stats: SMM statistics for coordinate transformation
@@ -536,26 +555,28 @@ def plot_plan(
     Returns:
         Image array
     """
-    tracked_obj_ids = tracked_obj_ids
-    obj_ids = jnp.argwhere(tracked_obj_ids).squeeze()
+    obj_ids = np.argwhere(tracked_obj_ids).squeeze()
     if obj_ids.shape == ():
         obj_ids = obj_ids[None]
 
     if decoded_mu is None:
         if plan_info["states"].shape[-1] > 6:
             colors = (plan_info["states"][0, 0, 0, obj_ids, -3:] * 128 + 128).astype(
-                jnp.uint8
+                np.uint8
             )
         else:
             colors = []
     else:
-        colors = (decoded_mu[obj_ids, 2:] * 128 + 128).astype(jnp.uint8)
+        colors = (decoded_mu[obj_ids, 2:] * 128 + 128).astype(np.uint8)
 
     rewards = plan_info["rewards"]
     if indices is not None:
         idx = indices
     else:
-        idx = jnp.argsort(rewards.sum(axis=0)[:, 0], descending=descending)[:topk]
+        if descending:
+            idx = np.argsort(-rewards.sum(axis=0)[:, 0])[:topk]
+        else:
+            idx = np.argsort(rewards.sum(axis=0)[:, 0])[:topk]
     states_topk = plan_info["states"][:, idx]
     rewards_topk = rewards[:, idx]
     utility_topk = plan_info["expected_utility"][:, idx]
@@ -582,7 +603,7 @@ def plot_rollouts(
     """Plot rollouts on observation.
     
     Args:
-        obs: RGB observation
+        obs: RGB observation (numpy array)
         states: States array [T, B, O, D]
         rewards: Rewards array [T, B, 1]
         colors: Colors for objects
@@ -617,7 +638,7 @@ def plot_rollouts(
     ax.axes.get_yaxis().set_ticks([])
 
     # Clip rewards into a sensible range for cmap
-    rewards = jnp.clip(rewards, -1, 1)
+    rewards = np.clip(rewards, -1, 1)
     for i in range(states.shape[1]):
         time_plot(
             ax,
@@ -668,10 +689,10 @@ def time_plot(ax, states, rewards, colors, stats=None, alpha=1.0):
         cmap = matplotlib.colors.LinearSegmentedColormap.from_list(
             "SMM-plot", [lc, color, hc]
         )
-        alpha_range = alpha * (jnp.linspace(1, 0, time_horizon) ** 2)
+        alpha_range = alpha * (np.linspace(1, 0, time_horizon) ** 2)
         color = cmap(rewards[i])
-        alpha_range = jnp.broadcast_to(alpha_range[:, None], (time_horizon, 4))
-        alpha_range = alpha_range.at[:, :3].set(color[:3])
+        alpha_range = np.broadcast_to(alpha_range[:, None], (time_horizon, 4))
+        alpha_range[:, :3] = color[:3]
         ax.scatter(state[:, 0], state[:, 1], c=alpha_range)
     ax.set_xlim(0, 210)
     ax.set_ylim(160, 0)
@@ -701,7 +722,7 @@ def str_to_col_triplet(c):
         RGB array [R, G, B]
     """
     h = c.lstrip("#")
-    return jnp.array([int(h[i : i + 2], 16) for i in (0, 2, 4)])
+    return np.array([int(h[i : i + 2], 16) for i in (0, 2, 4)])
 
 
 def col_triplet_to_str(c):
@@ -713,10 +734,10 @@ def col_triplet_to_str(c):
     Returns:
         Hex color string
     """
-    return f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
+    return f"#{int(c[0]):02x}{int(c[1]):02x}{int(c[2]):02x}"
 
 
-def hue_shift(color, amount=jnp.pi / 2):
+def hue_shift(color, amount=np.pi / 2):
     """Shift hue of a color.
     
     Args:
@@ -728,13 +749,15 @@ def hue_shift(color, amount=jnp.pi / 2):
     """
     if isinstance(color, str):
         color = str_to_col_triplet(color)
-    if color.dtype is not jnp.floating:
+    if color.dtype is not np.floating:
         color = color / 255
-    hsv = jnp.array(matplotlib.colors.rgb_to_hsv(color))
-    low = hsv.at[0].set((hsv[0] - amount) % (1.0))
-    high = hsv.at[0].set((hsv[0] + amount) % (1.0))
-    low_rgb = (matplotlib.colors.hsv_to_rgb(low) * 255).astype(jnp.int32)
-    high_rgb = (matplotlib.colors.hsv_to_rgb(high) * 255).astype(jnp.int32)
+    hsv = np.array(matplotlib.colors.rgb_to_hsv(color))
+    low = hsv.copy()
+    low[0] = (hsv[0] - amount) % (1.0)
+    high = hsv.copy()
+    high[0] = (hsv[0] + amount) % (1.0)
+    low_rgb = (matplotlib.colors.hsv_to_rgb(low) * 255).astype(np.int32)
+    high_rgb = (matplotlib.colors.hsv_to_rgb(high) * 255).astype(np.int32)
     return col_triplet_to_str(low_rgb), col_triplet_to_str(high_rgb)
 
 
@@ -759,7 +782,7 @@ def plot_elbo_smm(elbo, width, height):
     """Plot SMM ELBO heatmap.
     
     Args:
-        elbo: ELBO values
+        elbo: ELBO values (numpy array)
         width: Image width
         height: Image height
         
@@ -768,7 +791,7 @@ def plot_elbo_smm(elbo, width, height):
     """
     fig, ax = plt.subplots(figsize=((2.1 / height) * width, 2.1))
     ax.imshow(elbo.reshape(height, width))
-    idx = jnp.argmin(elbo)
+    idx = np.argmin(elbo)
     ax.scatter(idx % width, idx // width, color="red", marker="x")
     ax.axis("off")
     plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
@@ -779,7 +802,7 @@ def plot_qz_smm(qz, width, height):
     """Plot SMM slot assignment heatmap.
     
     Args:
-        qz: Assignment probabilities
+        qz: Assignment probabilities (numpy array)
         width: Image width
         height: Image height
         
@@ -788,7 +811,7 @@ def plot_qz_smm(qz, width, height):
     """
     fig, ax = plt.subplots(figsize=((2.1 / height) * width, 2.1))
     cmap = plt.get_cmap("tab20", qz.shape[-1])
-    assignments = cmap(qz[0].argmax(-1).reshape(height, width))[:, :, :3]
+    assignments = cmap(np.argmax(qz[0], axis=-1).reshape(height, width))[:, :, :3]
     ax.imshow(assignments)
     ax.axis("off")
     plt.subplots_adjust(left=0, right=1, bottom=0, top=1)

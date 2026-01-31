@@ -14,12 +14,22 @@
 # limitations under the License.
 
 from typing import Type, Optional, Union
-from jaxtyping import Array
+import numpy as np
 
-import jax.numpy as jnp
-import jax.tree_util as jtu
+from axiomcuda.vi import Distribution, ExponentialFamily, ArrayDict
+from axiomcuda.vi.utils import map_and_multiply
 
-from axiomcuda.vi import Distribution, ExponentialFamily, ArrayDict, utils
+# Import the C++ backend - this is the ONLY backend we use
+try:
+    import axiomcuda_backend as backend
+    HAS_CPP_BACKEND = True
+except ImportError:
+    HAS_CPP_BACKEND = False
+    raise RuntimeError(
+        "AXIOMCUDA C++ backend not found. Please build the C++ extensions:\n"
+        "  pip install -e .\n"
+        "The C++ backend is required - there is no JAX fallback."
+    )
 
 
 class Conjugate(Distribution):
@@ -58,7 +68,7 @@ class Conjugate(Distribution):
         likelihood_params = self.map_params_to_likelihood(
             self.expected_likelihood_params(), likelihood_cls=likelihood_cls
         )
-        self._likelihood = likelihood_cls(likelihood_params, event_dim=self.event_dim)
+        self._likelihood = likelihood_cls(nat_params=likelihood_params, event_dim=self.event_dim)
 
     @property
     def likelihood(self) -> ExponentialFamily:
@@ -90,31 +100,39 @@ class Conjugate(Distribution):
         """Expands parameters into larger batch shape."""
         assert shape[-self.batch_dim - self.event_dim :] == self.shape
         shape_diff = shape[: -self.batch_dim - self.event_dim]
-        self.posterior_params = jtu.tree_map(lambda x: jnp.broadcast_to(x, shape_diff + x.shape), self.posterior_params)
-        self.prior_params = jtu.tree_map(lambda x: jnp.broadcast_to(x, shape_diff + x.shape), self.prior_params)
+        
+        from axiomcuda.vi.utils import tree_map
+        self.posterior_params = tree_map(lambda x: np.broadcast_to(x, shape_diff + x.shape), self.posterior_params)
+        self.prior_params = tree_map(lambda x: np.broadcast_to(x, shape_diff + x.shape), self.prior_params)
         self.batch_shape = shape_diff + self.batch_shape
         self.batch_dim = len(self.batch_shape)
 
     def map_params_to_likelihood(self, params: ArrayDict, likelihood_cls: Type[ExponentialFamily] = None) -> ArrayDict:
         """Maps natural parameters to likelihood natural parameters."""
         conjugate_to_lh_mapping = self._conjugate_to_likelihood_mapping(likelihood_cls=likelihood_cls)
-        return utils.map_dict_names(params, name_mapping=conjugate_to_lh_mapping)
+        return self._map_dict_names(params, name_mapping=conjugate_to_lh_mapping)
+
+    def _map_dict_names(self, params: ArrayDict, name_mapping: dict = None) -> ArrayDict:
+        """Map ArrayDict keys to new names."""
+        if name_mapping is None:
+            return params
+        return ArrayDict(**{name_mapping[k]: v for k, v in params.items()})
 
     def expected_likelihood_params(self) -> ArrayDict:
         """Returns expected natural parameters <S(θ)>."""
         raise NotImplementedError
 
-    def expected_log_likelihood(self, data: Union[Array, tuple[Array]]) -> Array:
+    def expected_log_likelihood(self, data: Union[np.ndarray, tuple[np.ndarray]]) -> np.ndarray:
         """Computes expected log likelihood with CUDA acceleration."""
         x = data[0] if isinstance(data, tuple) else data
 
         counts_shape = self.get_sample_shape(x) + self.get_batch_shape(x)
         shape = counts_shape + (1,) * self.event_dim
-        counts = jnp.ones(counts_shape)
+        counts = np.ones(counts_shape)
 
         param_stats = self.map_stats_to_params(self.likelihood.statistics(data), counts)
 
-        tx_dot_stheta_minus_A = utils.map_and_multiply(
+        tx_dot_stheta_minus_A = map_and_multiply(
             self.expected_posterior_statistics(), param_stats, self.default_event_dim
         )
 
@@ -132,22 +150,23 @@ class Conjugate(Distribution):
         """Map canonical parameters to natural ones."""
         raise NotImplementedError
 
-    def log_prior_partition(self) -> Array:
+    def log_prior_partition(self) -> np.ndarray:
         """Computes log partition of prior log Z(η₀, ν₀)."""
         raise NotImplementedError
 
-    def log_posterior_partition(self) -> Array:
+    def log_posterior_partition(self) -> np.ndarray:
         """Computes log partition of posterior log Z(η, v)."""
         raise NotImplementedError
 
-    def residual(self) -> Array:
+    def residual(self) -> np.ndarray:
         """Computes residual A(<θ>) - <A(θ)>."""
         raise NotImplementedError
 
-    def kl_divergence(self) -> Array:
+    def kl_divergence(self) -> np.ndarray:
         """Computes KL divergence with CUDA acceleration."""
-        log_qp = jtu.tree_map(lambda x, y: x - y, self.posterior_params, self.prior_params)
-        expected_log_qp = utils.map_and_multiply(self.expected_posterior_statistics(), log_qp, self.default_event_dim)
+        from axiomcuda.vi.utils import tree_map, sum_pytrees
+        log_qp = tree_map(lambda x, y: x - y, self.posterior_params, self.prior_params)
+        expected_log_qp = map_and_multiply(self.expected_posterior_statistics(), log_qp, self.default_event_dim)
 
         kl_div = self.log_prior_partition() - self.log_posterior_partition() + expected_log_qp
         return self.sum_events(kl_div)
@@ -160,14 +179,14 @@ class Conjugate(Distribution):
         forward_message.residual = self.variational_residual()
         return forward_message
 
-    def statistics_dot_expected_params(self, x: Array) -> Array:
+    def statistics_dot_expected_params(self, x: np.ndarray) -> np.ndarray:
         """Computes expected dot product of statistics and expected params."""
         return self.likelihood.params_dot_statistics(x)
 
     def update_from_data(
         self,
-        data: Union[Array, tuple],
-        weights: Optional[Array] = None,
+        data: Union[np.ndarray, tuple],
+        weights: Optional[np.ndarray] = None,
         lr: float = 1.0,
         beta: float = 0.0,
     ):
@@ -176,10 +195,10 @@ class Conjugate(Distribution):
 
         counts_shape = self.get_sample_shape(x) + self.get_batch_shape(x)
         shape = counts_shape + (1,) * self.event_dim
-        counts = jnp.ones(counts_shape)
+        counts = np.ones(counts_shape)
         sample_dims = self.get_sample_dims(x)
 
-        weights = self.expand_event_dims(weights) if weights is not None else jnp.ones(shape)
+        weights = self.expand_event_dims(weights) if weights is not None else np.ones(shape)
 
         likelihood_stats = self.likelihood.statistics(data)
 
@@ -190,10 +209,13 @@ class Conjugate(Distribution):
 
     def update_from_statistics(self, summed_stats: ArrayDict, lr: float = 1.0, beta: float = 0.0):
         """Updates posterior given likelihood statistics."""
-        scaled_updates = jtu.tree_map(lambda x: lr * x, summed_stats)
-        scaled_prior = jtu.tree_map(lambda x: lr * (1.0 - beta) * x, self.prior_params)
-        posterior_past = jtu.tree_map(lambda x: (1.0 - lr * (1.0 - beta)) * x, self.posterior_params)
-        updated_posterior_params = utils.apply_add(posterior_past, utils.apply_add(scaled_prior, scaled_updates))
+        from axiomcuda.vi.utils import apply_add, apply_scale
+        scaled_updates = apply_scale(summed_stats, lr)
+        scaled_prior = apply_scale(self.prior_params, lr * (1.0 - beta))
+        posterior_past = apply_scale(self.posterior_params, (1.0 - lr * (1.0 - beta)))
+        
+        from axiomcuda.vi.utils import sum_pytrees
+        updated_posterior_params = sum_pytrees(posterior_past, scaled_prior, scaled_updates)
 
         self.posterior_params = updated_posterior_params
         self.likelihood.nat_params = self.map_params_to_likelihood(self.expected_likelihood_params())
@@ -201,7 +223,7 @@ class Conjugate(Distribution):
     def update_from_probabilities(
         self,
         data: Union[Distribution, tuple[Distribution]],
-        weights: Optional[Array] = None,
+        weights: Optional[np.ndarray] = None,
         lr: float = 1.0,
         beta: float = 0.0,
     ):
@@ -210,12 +232,11 @@ class Conjugate(Distribution):
 
         counts_shape = self.get_sample_shape(distribution.mean) + self.get_batch_shape(distribution.mean)
         shape = counts_shape + (1,) * self.event_dim
-        counts = jnp.ones(counts_shape)
+        counts = np.ones(counts_shape)
 
         sample_dims = self.get_sample_dims(distribution.mean)
 
-        counts = jnp.ones(counts_shape)
-        weights = self.expand_event_dims(weights) if weights is not None else jnp.ones(shape)
+        weights = self.expand_event_dims(weights) if weights is not None else np.ones(shape)
 
         distribution_stats = (
             distribution.expected_statistics()
@@ -228,26 +249,24 @@ class Conjugate(Distribution):
 
         self.update_from_statistics(summed_stats, lr, beta)
 
-    def sum_stats_over_samples(self, stats: ArrayDict, weights: Array, sample_dims: list[int]) -> ArrayDict:
+    def sum_stats_over_samples(self, stats: ArrayDict, weights: np.ndarray, sample_dims: list[int]) -> ArrayDict:
         """Sums over sample dimensions of statistics."""
-        return jtu.tree_map(lambda leaf_array: (leaf_array * weights).sum(sample_dims), stats)
+        from axiomcuda.vi.utils import tree_map
+        return tree_map(lambda leaf_array: (leaf_array * weights).sum(sample_dims), stats)
 
-    def map_stats_to_params(self, likelihood_stats: ArrayDict, counts: Array) -> ArrayDict:
+    def map_stats_to_params(self, likelihood_stats: ArrayDict, counts: np.ndarray) -> ArrayDict:
         """Maps statistics keys to natural parameter keys."""
-        stats_leaves, stats_treedef = jtu.tree_flatten(likelihood_stats)
-        eta_treedef = jtu.tree_structure(self.posterior_params.eta)
-
-        assert len(eta_treedef.node_data()[1]) == len(stats_treedef.node_data()[1])
-
+        from axiomcuda.vi.utils import tree_leaves, tree_map
+        
         mapping = self._get_params_to_stats_mapping()
 
         def map_fn(key):
             return likelihood_stats.get(mapping.get(key, None), None)
 
-        mapped_leaves = jtu.tree_map(map_fn, eta_treedef.node_data()[1])
-        eta_stats = jtu.tree_unflatten(eta_treedef, mapped_leaves)
+        eta_keys = [k for k in self.posterior_params.eta.keys()]
+        eta_stats = ArrayDict(**{k: map_fn(k) for k in eta_keys})
 
-        nu_stats = jtu.tree_map(lambda x: self.expand_event_dims(counts), self.posterior_params.nu)
+        nu_stats = tree_map(lambda x: self.expand_event_dims(counts), self.posterior_params.nu)
 
         return ArrayDict(eta=eta_stats, nu=nu_stats)
 

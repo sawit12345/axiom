@@ -16,13 +16,15 @@
 """
 AxiomCUDA - High-performance CUDA-accelerated tensor operations for Axiom
 
-This package provides a CUDA-accelerated API layer that mirrors the original
-Axiom API while providing GPU acceleration through custom CUDA kernels.
+This package provides a CUDA-accelerated API layer using the C++ backend.
 """
 
 __version__ = "0.1.0"
 
-# Core imports
+# Import C++ backend
+import axiomcuda_backend as backend
+
+# Core imports - all from C++ backend wrappers
 from .device import Device, get_device, set_default_device, cuda_available
 from .tensor import Tensor
 from .config import (

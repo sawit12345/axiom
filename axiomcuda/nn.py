@@ -14,19 +14,19 @@
 # limitations under the License.
 
 """
-Neural network utilities for AxiomCUDA.
+Neural network utilities for AxiomCUDA using C++ backend.
 
-Provides common neural network operations like softmax, activations,
-and one-hot encoding with GPU acceleration support.
+Provides common neural network operations using the C++ backend for acceleration.
 """
 
 import numpy as np
 from typing import Optional, Union
+import axiomcuda_backend as backend
 from .tensor import Tensor
 
 
 def softmax(x: Union[Tensor, np.ndarray], axis: int = -1) -> Union[Tensor, np.ndarray]:
-    """Compute softmax activation.
+    """Compute softmax activation using C++ backend.
     
     softmax(x)_i = exp(x_i) / sum_j exp(x_j)
     
@@ -45,18 +45,36 @@ def softmax(x: Union[Tensor, np.ndarray], axis: int = -1) -> Union[Tensor, np.nd
         array([0.09003057, 0.24472847, 0.66524096])
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
-    
-    # Subtract max for numerical stability
-    max_vals = np.max(arr, axis=axis, keepdims=True)
-    shifted = arr - max_vals
-    exp_x = np.exp(shifted)
-    sum_exp = np.sum(exp_x, axis=axis, keepdims=True)
-    result = exp_x / sum_exp
     
     if is_tensor:
-        return Tensor(result, device=x.device)
-    return result
+        # Use backend softmax
+        result_tensor = backend.math.softmax(x._tensor, axis)
+        return Tensor(result_tensor)
+    else:
+        # Use backend with numpy
+        arr = np.asarray(x, dtype=np.float64)
+        result = np.zeros_like(arr)
+        
+        # Handle different axis values
+        if axis == -1:
+            axis = len(arr.shape) - 1
+        
+        # Use backend.softmax_dim for batched operations
+        if len(arr.shape) == 1:
+            backend.math.softmax(arr, result, len(arr))
+        else:
+            # Reshape for batch processing
+            batch_size = int(np.prod(arr.shape[:axis]))
+            dim_size = arr.shape[axis]
+            flat_arr = arr.reshape(batch_size, -1) if axis == 0 else arr.reshape(-1, dim_size)
+            flat_result = np.zeros_like(flat_arr)
+            
+            for i in range(flat_arr.shape[0]):
+                backend.math.softmax(flat_arr[i], flat_result[i], dim_size)
+            
+            result = flat_result.reshape(arr.shape)
+        
+        return result
 
 
 def log_softmax(x: Union[Tensor, np.ndarray], axis: int = -1) -> Union[Tensor, np.ndarray]:
@@ -74,14 +92,12 @@ def log_softmax(x: Union[Tensor, np.ndarray], axis: int = -1) -> Union[Tensor, n
         Log-softmax of input (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     
-    # Subtract max for numerical stability
+    # Compute using logsumexp
     max_vals = np.max(arr, axis=axis, keepdims=True)
     shifted = arr - max_vals
-    exp_x = np.exp(shifted)
-    sum_exp = np.sum(exp_x, axis=axis, keepdims=True)
-    log_sum_exp = np.log(sum_exp) + max_vals
+    log_sum_exp = backend.math.logsumexp(shifted.ravel(), shifted.size) + max_vals
     result = arr - log_sum_exp
     
     if is_tensor:
@@ -114,7 +130,7 @@ def one_hot(
                [0., 1., 0., 0.]])
     """
     is_tensor = isinstance(indices, Tensor)
-    arr = indices._data if is_tensor else np.asarray(indices)
+    arr = indices.numpy() if is_tensor else np.asarray(indices)
     
     # Flatten for easier processing
     flat_indices = arr.reshape(-1)
@@ -146,7 +162,7 @@ def relu(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         ReLU activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.maximum(0, arr)
     
     if is_tensor:
@@ -167,7 +183,7 @@ def gelu(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         GELU activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     
     # Approximation from the original GELU paper
     c = 0.044715
@@ -189,7 +205,7 @@ def sigmoid(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Sigmoid activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = 1.0 / (1.0 + np.exp(-arr))
     
     if is_tensor:
@@ -207,7 +223,7 @@ def tanh(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Tanh activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.tanh(arr)
     
     if is_tensor:
@@ -225,7 +241,7 @@ def silu(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         SiLU activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = arr / (1.0 + np.exp(-arr))
     
     if is_tensor:
@@ -246,7 +262,7 @@ def swish(x: Union[Tensor, np.ndarray], beta: float = 1.0) -> Union[Tensor, np.n
         Swish activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = arr / (1.0 + np.exp(-beta * arr))
     
     if is_tensor:
@@ -265,7 +281,7 @@ def leaky_relu(x: Union[Tensor, np.ndarray], negative_slope: float = 0.01) -> Un
         Leaky ReLU activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.where(arr > 0, arr, negative_slope * arr)
     
     if is_tensor:
@@ -285,7 +301,7 @@ def elu(x: Union[Tensor, np.ndarray], alpha: float = 1.0) -> Union[Tensor, np.nd
         ELU activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.where(arr > 0, arr, alpha * (np.exp(arr) - 1))
     
     if is_tensor:
@@ -320,7 +336,7 @@ def softplus(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Softplus activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     # For numerical stability
     result = np.where(arr > 20, arr, np.log1p(np.exp(arr)))
     
@@ -339,7 +355,7 @@ def softsign(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Softsign activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = arr / (1.0 + np.abs(arr))
     
     if is_tensor:
@@ -359,7 +375,7 @@ def hard_sigmoid(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Hard sigmoid activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.clip(arr / 6.0 + 0.5, 0.0, 1.0)
     
     if is_tensor:
@@ -377,7 +393,7 @@ def hard_swish(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         Hard swish activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = arr * np.clip(arr / 6.0 + 0.5, 0.0, 1.0)
     
     if is_tensor:
@@ -397,7 +413,7 @@ def relu6(x: Union[Tensor, np.ndarray]) -> Union[Tensor, np.ndarray]:
         ReLU6 activation (same type as input)
     """
     is_tensor = isinstance(x, Tensor)
-    arr = x._data if is_tensor else np.asarray(x)
+    arr = x.numpy() if is_tensor else np.asarray(x)
     result = np.clip(arr, 0.0, 6.0)
     
     if is_tensor:
@@ -423,8 +439,8 @@ def cross_entropy_loss(
         Cross-entropy loss
     """
     is_tensor = isinstance(logits, Tensor)
-    logits_arr = logits._data if is_tensor else np.asarray(logits)
-    targets_arr = targets._data if isinstance(targets, Tensor) else np.asarray(targets)
+    logits_arr = logits.numpy() if is_tensor else np.asarray(logits)
+    targets_arr = targets.numpy() if isinstance(targets, Tensor) else np.asarray(targets)
     
     # Log-softmax for numerical stability
     log_probs = log_softmax(logits_arr, axis=-1)
@@ -461,8 +477,8 @@ def binary_cross_entropy(
         Binary cross-entropy loss
     """
     is_tensor = isinstance(predictions, Tensor)
-    pred_arr = predictions._data if is_tensor else np.asarray(predictions)
-    targets_arr = targets._data if isinstance(targets, Tensor) else np.asarray(targets)
+    pred_arr = predictions.numpy() if is_tensor else np.asarray(predictions)
+    targets_arr = targets.numpy() if isinstance(targets, Tensor) else np.asarray(targets)
     
     # Clip predictions for numerical stability
     epsilon = 1e-7
@@ -498,8 +514,8 @@ def mse_loss(
         MSE loss
     """
     is_tensor = isinstance(predictions, Tensor)
-    pred_arr = predictions._data if is_tensor else np.asarray(predictions)
-    targets_arr = targets._data if isinstance(targets, Tensor) else np.asarray(targets)
+    pred_arr = predictions.numpy() if is_tensor else np.asarray(predictions)
+    targets_arr = targets.numpy() if isinstance(targets, Tensor) else np.asarray(targets)
     
     loss = (pred_arr - targets_arr) ** 2
     
@@ -531,8 +547,8 @@ def l1_loss(
         L1 loss
     """
     is_tensor = isinstance(predictions, Tensor)
-    pred_arr = predictions._data if is_tensor else np.asarray(predictions)
-    targets_arr = targets._data if isinstance(targets, Tensor) else np.asarray(targets)
+    pred_arr = predictions.numpy() if is_tensor else np.asarray(predictions)
+    targets_arr = targets.numpy() if isinstance(targets, Tensor) else np.asarray(targets)
     
     loss = np.abs(pred_arr - targets_arr)
     

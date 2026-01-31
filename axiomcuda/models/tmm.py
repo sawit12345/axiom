@@ -22,20 +22,16 @@ Wraps the C++ backend for GPU-accelerated transition dynamics modeling.
 from typing import NamedTuple
 from dataclasses import dataclass
 
-import equinox as eqx
+import numpy as np
 
-import jax
-import jax.numpy as jnp
-from jax.scipy.linalg import block_diag
-from jax import lax
-from jaxtyping import Array
+# Use ONLY the C++ backend
+try:
+    import axiomcuda_backend as backend
+    BACKEND_AVAILABLE = True
+except ImportError:
+    BACKEND_AVAILABLE = False
 
-from .base import (
-    ModelConfig,
-    to_device,
-    check_cuda_available,
-    call_cpp_backend,
-)
+from .base import ModelConfig
 
 
 @dataclass(frozen=True)
@@ -74,14 +70,259 @@ class TMM(NamedTuple):
     """Transition Mixture Model container.
     
     Attributes:
+        model: The underlying C++ TransitionMixtureModel handle.
         transitions: Transition matrices (K_max, 2*state_dim, 2*state_dim+1).
         used_mask: Boolean mask for used components.
     """
-    transitions: Array
-    used_mask: Array
+    model: object  # C++ backend model handle
+    transitions: np.ndarray
+    used_mask: np.ndarray
 
 
-def generate_default_dynamics_component(state_dim, dt=1.0, use_bias=True):
+def _check_backend():
+    """Check if C++ backend is available."""
+    if not BACKEND_AVAILABLE:
+        raise RuntimeError("C++ backend (axiomcuda_backend) is not available. Cannot create TMM model.")
+
+
+def create_tmm(
+    n_total_components: int,
+    state_dim: int,
+    dt: float = 1.0,
+    vu: float = 0.1,
+    use_bias: bool = True,
+    use_velocity: bool = True,
+    **kwargs,
+) -> TMM:
+    """
+    Create a Transition Mixture Model using the C++ backend.
+    
+    Args:
+        n_total_components: Total number of components.
+        state_dim: State dimension.
+        dt: Time step.
+        vu: Unused counter velocity.
+        use_bias: Whether to use bias.
+        use_velocity: Whether to use velocity components.
+        **kwargs: Additional arguments.
+        
+    Returns:
+        TMM: Initialized Transition Mixture Model.
+    """
+    _check_backend()
+    
+    # Create the C++ backend model using factory function
+    model = backend.models.createTMM(
+        n_total_components,
+        state_dim,
+        dt,
+        vu,
+        use_bias,
+        use_velocity
+    )
+    
+    # Get initial transitions and used mask from model state
+    transitions = np.zeros(
+        (n_total_components, 2 * state_dim, 2 * state_dim + int(use_bias)),
+        dtype=np.float64
+    )
+    used_mask = model.getUsedMask().data.astype(bool)
+    
+    # Copy initial transitions from model
+    for k in range(n_total_components):
+        if used_mask[k]:
+            trans_k = np.zeros((2 * state_dim, 2 * state_dim + int(use_bias)), dtype=np.float64)
+            model.getTransition(k, trans_k)
+            transitions[k] = trans_k
+    
+    return TMM(
+        model=model,
+        transitions=transitions,
+        used_mask=used_mask,
+    )
+
+
+def forward(transitions: np.ndarray, x: np.ndarray) -> np.ndarray:
+    """
+    Apply transition model to state.
+    
+    Args:
+        transitions: (K_max, 2*state_dim, (2*state_dim)+1) transition matrices.
+        x: (2*state_dim,) state vector.
+        
+    Returns:
+        Predicted next states (K_max, 2*state_dim).
+    """
+    # y = A @ x + b where transitions = [A | b]
+    A = transitions[..., :-1]
+    b = transitions[..., -1]
+    return (A @ x).sum(axis=-1) + b
+
+
+def forward_single(model, x: np.ndarray) -> np.ndarray:
+    """
+    Apply single best transition to state using C++ backend.
+    
+    Args:
+        model: TMM model.
+        x: (2*state_dim,) state vector.
+        
+    Returns:
+        Predicted next state (2*state_dim,).
+    """
+    _check_backend()
+    
+    x_t = x.astype(np.float64)
+    out = np.zeros_like(x_t)
+    
+    # Use C++ forward method
+    # model.forward expects a batch of transitions but we pass single
+    return model.forward(x_t)
+
+
+def gaussian_loglike(y: np.ndarray, mu: np.ndarray, sigma_sqr: float = 2.0) -> np.ndarray:
+    """
+    Compute Gaussian log-likelihood.
+    
+    Args:
+        y: Observed values.
+        mu: Mean values.
+        sigma_sqr: Variance.
+        
+    Returns:
+        Log-likelihood values.
+    """
+    squared_error = ((y - mu) ** 2).sum(axis=-1)
+    dim = y.shape[-1]
+    return -0.5 * squared_error / sigma_sqr - 0.5 * dim * np.log(2 * np.pi * sigma_sqr)
+
+
+def compute_logprobs(model, x_prev: np.ndarray, x_curr: np.ndarray, sigma_sqr: float = 2.0, use_velocity: bool = True) -> np.ndarray:
+    """
+    Compute log probabilities for transitions using C++ backend.
+    
+    Args:
+        model: TMM model.
+        x_prev: Previous state.
+        x_curr: Current state.
+        sigma_sqr: Variance.
+        use_velocity: Whether to use velocity in likelihood.
+        
+    Returns:
+        Log probabilities for each component.
+    """
+    _check_backend()
+    
+    x_prev_t = x_prev.astype(np.float64)
+    x_curr_t = x_curr.astype(np.float64)
+    
+    out_logprobs = np.zeros(model.state_.n_total_components, dtype=np.float64)
+    
+    model.computeLogProbs(x_prev_t, x_curr_t, sigma_sqr, use_velocity, out_logprobs)
+    
+    return out_logprobs
+
+
+def compute_logprobs_masked(model, x_prev: np.ndarray, x_curr: np.ndarray, sigma_sqr: float = 2.0, use_velocity: bool = True) -> np.ndarray:
+    """Compute log probabilities with masking using C++ backend.
+    
+    Args:
+        model: TMM model.
+        x_prev: Previous state.
+        x_curr: Current state.
+        sigma_sqr: Variance.
+        use_velocity: Whether to use velocity.
+        
+    Returns:
+        Log probabilities (masked components get -inf).
+    """
+    _check_backend()
+    
+    x_prev_t = x_prev.astype(np.float64)
+    x_curr_t = x_curr.astype(np.float64)
+    
+    out_logprobs = np.zeros(model.state_.n_total_components, dtype=np.float64)
+    
+    model.computeLogProbsMasked(x_prev_t, x_curr_t, sigma_sqr, use_velocity, out_logprobs)
+    
+    return out_logprobs
+
+
+def get_best_transition(model, x_prev: np.ndarray, x_curr: np.ndarray) -> int:
+    """Get best transition for state pair.
+    
+    Args:
+        model: TMM model.
+        x_prev: Previous state.
+        x_curr: Current state.
+        
+    Returns:
+        Index of best transition.
+    """
+    _check_backend()
+    
+    x_prev_t = x_prev.astype(np.float64)
+    x_curr_t = x_curr.astype(np.float64)
+    
+    return model.getBestTransition(x_prev_t, x_curr_t)
+
+
+def update_model(
+    model,
+    x_prev: np.ndarray,
+    x_curr: np.ndarray,
+    sigma_sqr: float = 2.0,
+    logp_threshold: float = -0.00001,
+    position_threshold: float = 0.15,
+    dt: float = 1.0,
+    use_unused_counter: bool = True,
+    use_velocity: bool = True,
+    clip_value: float = 5e-4,
+    **kwargs,
+) -> Tuple[object, np.ndarray]:
+    """
+    Update TMM model with new transition using C++ backend.
+    
+    Args:
+        model: TMM model.
+        x_prev: Previous state.
+        x_curr: Current state.
+        sigma_sqr: Variance.
+        logp_threshold: Threshold for adding new component.
+        position_threshold: Position threshold.
+        dt: Time step.
+        use_unused_counter: Whether to use unused counter.
+        use_velocity: Whether to use velocity.
+        clip_value: Small value to clip.
+        
+    Returns:
+        Tuple of (updated_model, logprobs).
+    """
+    _check_backend()
+    
+    x_prev_t = x_prev.astype(np.float64)
+    x_curr_t = x_curr.astype(np.float64)
+    
+    # Update the model
+    model.updateModel(
+        x_prev_t,
+        x_curr_t,
+        sigma_sqr,
+        logp_threshold,
+        position_threshold,
+        dt,
+        use_unused_counter,
+        use_velocity,
+        clip_value
+    )
+    
+    # Get updated log probabilities
+    logprobs = compute_logprobs_masked(model, x_prev, x_curr, sigma_sqr, use_velocity)
+    
+    return model, logprobs
+
+
+def generate_default_dynamics_component(state_dim: int, dt: float = 1.0, use_bias: bool = True) -> np.ndarray:
     """
     Generate default dynamics component (constant velocity model).
     
@@ -93,50 +334,26 @@ def generate_default_dynamics_component(state_dim, dt=1.0, use_bias=True):
     Returns:
         Transition matrix of shape (2*state_dim, (2*state_dim)+1).
     """
-    # encodes the assumption that velocity is constant in time
-    velocity_coupling = jnp.eye(state_dim)
-    base_transitions = block_diag(jnp.eye(state_dim), velocity_coupling)
-    transition_matrix = jnp.pad(base_transitions, [(0, 0), (0, 1)])
-    transition_matrix = transition_matrix.at[:state_dim, state_dim:-1].set(
-        jnp.diag(dt * jnp.ones(state_dim))
-    )
-
-    if not use_bias:
-        transition_matrix = transition_matrix[:, :-1]
-
-    # Remove unused velocity and bias (assume used)
-    transition_matrix = transition_matrix.at[2, :].set(0)
-    transition_matrix = transition_matrix.at[5, :].set(0)
-
-    return transition_matrix
-
-
-def generate_default_become_unused_component(state_dim, dt=1, vu=1, use_bias=True):
-    """Generate component for becoming unused.
+    full_dim = 2 * state_dim
+    x_dim = full_dim + int(use_bias)
     
-    Args:
-        state_dim: State dimension.
-        dt: Time step.
-        vu: Unused counter velocity.
-        use_bias: Whether to use bias.
-        
-    Returns:
-        Transition matrix.
-    """
-    transition_matrix = jnp.zeros((state_dim * 2, state_dim * 2 + int(use_bias)))
-    transition_matrix = transition_matrix.at[: state_dim - 1, : state_dim - 1].set(
-        jnp.eye(state_dim - 1)
-    )
-    # set the unused component to dt * vu
-    transition_matrix = transition_matrix.at[state_dim - 1, -1].set(dt * vu)
-
-    if not use_bias:
-        transition_matrix = transition_matrix[:, :-1]
-
-    return transition_matrix
+    # Initialize to zero
+    transition = np.zeros((full_dim, x_dim), dtype=np.float64)
+    
+    # Position identity and velocity coupling
+    for i in range(state_dim):
+        transition[i, i] = 1.0
+        transition[state_dim + i, state_dim + i] = 1.0
+        transition[i, state_dim + i] = dt
+    
+    # Zero out unused counter velocity
+    transition[state_dim - 1, :] = 0.0
+    transition[full_dim - 1, :] = 0.0
+    
+    return transition
 
 
-def generate_default_keep_unused_component(state_dim, dt=1, vu=1, use_bias=True):
+def generate_default_keep_unused_component(state_dim: int, dt: float = 1.0, vu: float = 1.0, use_bias: bool = True) -> np.ndarray:
     """Generate component for keeping unused state.
     
     Args:
@@ -148,24 +365,55 @@ def generate_default_keep_unused_component(state_dim, dt=1, vu=1, use_bias=True)
     Returns:
         Transition matrix.
     """
-    transition_matrix = jnp.zeros((state_dim * 2, state_dim * 2 + int(use_bias)))
-    transition_matrix = transition_matrix.at[:state_dim, :state_dim].set(
-        jnp.eye(state_dim)
-    )
-    transition_matrix = transition_matrix.at[
-        state_dim : 2 * state_dim - 1, state_dim : 2 * state_dim - 1
-    ].set(jnp.eye(state_dim - 1))
+    full_dim = 2 * state_dim
+    x_dim = full_dim + int(use_bias)
+    
+    transition = np.zeros((full_dim, x_dim), dtype=np.float64)
+    
+    # Keep position
+    for i in range(state_dim):
+        transition[i, i] = 1.0
+    
+    # Keep velocity (except unused counter)
+    for i in range(state_dim - 1):
+        transition[state_dim + i, state_dim + i] = 1.0
+    
+    # Bias for unused counter
+    if use_bias:
+        transition[state_dim - 1, -1] = dt * vu
+    
+    return transition
 
-    # set the unused component to dt * vu
-    transition_matrix = transition_matrix.at[state_dim - 1, -1].set(dt * vu)
 
-    if not use_bias:
-        transition_matrix = transition_matrix[:, :-1]
+def generate_default_become_unused_component(state_dim: int, dt: float = 1.0, vu: float = 1.0, use_bias: bool = True) -> np.ndarray:
+    """Generate component for becoming unused.
+    
+    Args:
+        state_dim: State dimension.
+        dt: Time step.
+        vu: Unused counter velocity.
+        use_bias: Whether to use bias.
+        
+    Returns:
+        Transition matrix.
+    """
+    full_dim = 2 * state_dim
+    x_dim = full_dim + int(use_bias)
+    
+    transition = np.zeros((full_dim, x_dim), dtype=np.float64)
+    
+    # Keep position (except last)
+    for i in range(state_dim - 1):
+        transition[i, i] = 1.0
+    
+    # Bias for unused counter
+    if use_bias:
+        transition[state_dim - 1, -1] = dt * vu
+    
+    return transition
 
-    return transition_matrix
 
-
-def generate_default_stop_component(state_dim, use_bias=True):
+def generate_default_stop_component(state_dim: int, use_bias: bool = True) -> np.ndarray:
     """Generate stop component (zero velocity).
     
     Args:
@@ -175,12 +423,20 @@ def generate_default_stop_component(state_dim, use_bias=True):
     Returns:
         Transition matrix.
     """
-    transition_matrix = jnp.zeros((state_dim * 2, state_dim * 2 + int(use_bias)))
-    transition_matrix = transition_matrix.at[:2, :2].set(jnp.eye(2))
-    return transition_matrix
+    full_dim = 2 * state_dim
+    x_dim = full_dim + int(use_bias)
+    
+    transition = np.zeros((full_dim, x_dim), dtype=np.float64)
+    
+    # Position identity for first 2 coordinates
+    transition[0, 0] = 1.0
+    if full_dim > 1:
+        transition[1, 1] = 1.0
+    
+    return transition
 
 
-def create_velocity_component(x_current, x_next, dt=1.0, use_unused_counter=True):
+def create_velocity_component(x_current: np.ndarray, x_next: np.ndarray, dt: float = 1.0, use_unused_counter: bool = True) -> np.ndarray:
     """Create velocity component from current and next state.
     
     Args:
@@ -193,24 +449,24 @@ def create_velocity_component(x_current, x_next, dt=1.0, use_unused_counter=True
         Transition matrix.
     """
     state_dim = x_current.shape[-1] // 2
-    base_dynamics = generate_default_dynamics_component(
-        state_dim=state_dim, dt=dt, use_bias=True
-    )
+    base_dynamics = generate_default_dynamics_component(state_dim, dt, True)
+    
     vel = x_next[:state_dim] - x_current[:state_dim]
     prev_vel = x_current[state_dim:]
     vel_bias = vel - prev_vel
-
-    new_component = base_dynamics.at[:, -1].set(jnp.concatenate(2 * [vel_bias]))
-
-    # No unused here
+    
+    new_component = base_dynamics.copy()
+    new_component[:, -1] = np.concatenate([vel_bias, vel_bias])
+    
+    # Zero out unused
     if use_unused_counter:
-        new_component = new_component.at[state_dim - 1, :].set(0)
-        new_component = new_component.at[2 * state_dim - 1, :].set(0)
-
+        new_component[state_dim - 1, :] = 0.0
+        new_component[2 * state_dim - 1, :] = 0.0
+    
     return new_component
 
 
-def create_bias_component(x, use_unused_counter):
+def create_bias_component(x: np.ndarray, use_unused_counter: bool) -> np.ndarray:
     """Create bias component from state.
     
     Args:
@@ -221,469 +477,14 @@ def create_bias_component(x, use_unused_counter):
         Transition matrix.
     """
     state_dim_with_vel = x.shape[-1]
-    new_component = jnp.concatenate(
-        [jnp.zeros((state_dim_with_vel, state_dim_with_vel)), x[..., None]], axis=-1
-    )
-
-    # No unused here
+    new_component = np.concatenate([
+        np.zeros((state_dim_with_vel, state_dim_with_vel)),
+        x[..., None]
+    ], axis=-1)
+    
+    # Zero out unused
     if use_unused_counter:
-        new_component = new_component.at[state_dim_with_vel // 2 - 1, :].set(0)
-        new_component = new_component.at[state_dim_with_vel - 1, :].set(0)
+        new_component[state_dim_with_vel // 2 - 1, :] = 0.0
+        new_component[state_dim_with_vel - 1, :] = 0.0
+    
     return new_component
-
-
-def create_position_velocity_component(transitions, x_prev, x_curr, use_unused_counter):
-    """Create position-velocity component.
-    
-    Args:
-        transitions: Existing transitions.
-        x_prev: Previous state.
-        x_curr: Current state.
-        use_unused_counter: Whether to use unused counter.
-        
-    Returns:
-        Transition matrix.
-    """
-    num_coords = x_curr.shape[-1] // 2 - int(use_unused_counter)
-
-    vel = x_curr[:num_coords] - x_prev[:num_coords]
-    new_component = jnp.zeros_like(transitions[0])
-
-    new_component = new_component.at[:num_coords, :num_coords].set(jnp.eye(num_coords))
-    new_component = new_component.at[:num_coords, -1].set(vel)
-
-    new_component = new_component.at[
-        num_coords + int(use_unused_counter) : 2 * num_coords + int(use_unused_counter),
-        -1,
-    ].set(vel)
-    return new_component
-
-
-def create_position_bias_component(transitions, x_prev, x_curr):
-    """Create position-bias component.
-    
-    Args:
-        transitions: Existing transitions.
-        x_prev: Previous state.
-        x_curr: Current state.
-        
-    Returns:
-        Transition matrix.
-    """
-    new_component = jnp.zeros_like(transitions[0])
-    new_component = new_component.at[:2, -1].set(x_curr[:2])
-    return new_component
-
-
-def add_component(existing_transitions, new_transition, used_mask):
-    """
-    Add a new transition component to existing transitions.
-    
-    Args:
-        existing_transitions: (K_max, ...) transition matrices.
-        new_transition: New transition matrix to add.
-        used_mask: (K_max,) boolean mask for used slots.
-        
-    Returns:
-        Updated transitions with new component added.
-    """
-    # Boolean for the first row that is False in `used_mask`
-    first_unused_mask = jnp.logical_and(~used_mask, jnp.cumsum(~used_mask) == 1)
-
-    # Expand dims so that it can broadcast to the shape of new_transition
-    mask_expanded = first_unused_mask[..., None, None]
-    update_tensor = mask_expanded * new_transition
-
-    return existing_transitions + update_tensor
-
-
-def forward(transitions, x):
-    """
-    Apply transition model to state.
-    
-    Args:
-        transitions: (K_max, 2*state_dim, (2*state_dim)+1) transition matrices.
-        x: (2*state_dim,) state vector.
-        
-    Returns:
-        Predicted next states (K_max, 2*state_dim).
-    """
-    return (transitions[..., :-1] * x).sum(-1) + transitions[..., -1]
-
-
-def gaussian_loglike(y, mu, sigma_sqr=2):
-    """
-    Compute Gaussian log-likelihood.
-    
-    Args:
-        y: Observed values.
-        mu: Mean values.
-        sigma_sqr: Variance.
-        
-    Returns:
-        Log-likelihood values.
-    """
-    squared_error = (y - mu) ** 2
-    return -0.5 * squared_error.sum(axis=-1) / sigma_sqr - 0.5 * y.shape[-1] * jnp.log(
-        2 * jnp.pi * sigma_sqr
-    )
-
-
-def compute_logprobs(transitions, x_prev, x_curr, sigma_sqr=2, use_velocity=True):
-    """
-    Compute log probabilities for transitions.
-    
-    Args:
-        transitions: Transition matrices.
-        x_prev: Previous state.
-        x_curr: Current state.
-        sigma_sqr: Variance.
-        use_velocity: Whether to use velocity in likelihood.
-        
-    Returns:
-        Log probabilities for each component.
-    """
-    mu = forward(transitions, x_prev)
-    if use_velocity:
-        return gaussian_loglike(x_curr, mu, sigma_sqr)
-    else:
-        return gaussian_loglike(x_curr.at[:3], mu[:, :3], sigma_sqr)
-
-
-def add_vel_or_bias_component(
-    transitions,
-    x_prev,
-    x_curr,
-    used_mask,
-    pos_thr,
-    use_unused_counter=False,
-    dt=1.0,
-    use_velocity=True,
-    clip_value=5e-4,
-):
-    """Add velocity or bias component based on teleportation check.
-    
-    Args:
-        transitions: Existing transitions.
-        x_prev: Previous state.
-        x_curr: Current state.
-        used_mask: Used component mask.
-        pos_thr: Position threshold for teleportation.
-        use_unused_counter: Whether to use unused counter.
-        dt: Time step.
-        use_velocity: Whether to use velocity components.
-        clip_value: Small value to clip.
-        
-    Returns:
-        Updated transitions.
-    """
-    state_dim = x_curr.shape[-1] // 2 - int(use_unused_counter)
-
-    # conditions for creating a bias component
-    teleport = jnp.linalg.norm(x_curr[:state_dim] - x_prev[:state_dim]) > pos_thr
-
-    if use_velocity:
-        component_to_add = lax.cond(
-            teleport,
-            lambda x: create_bias_component(x, use_unused_counter),
-            lambda x: create_velocity_component(x_prev, x, dt, use_unused_counter),
-            x_curr,
-        )
-    else:
-        component_to_add = lax.cond(
-            teleport,
-            lambda x: create_position_bias_component(
-                transitions, x_prev, x, use_unused_counter
-            ),
-            lambda x: create_position_velocity_component(
-                transitions, x_prev, x, use_unused_counter
-            ),
-            x_curr,
-        )
-
-    # filter out noisy values below clip_value
-    component_to_add = jnp.where(
-        jnp.abs(component_to_add) < clip_value, 0.0, component_to_add
-    )
-
-    return add_component(transitions, component_to_add, used_mask)
-
-
-def single_logprob(transition, x_prev, x_curr, sigma_sqr):
-    """
-    Compute log probability for single transition.
-    
-    Args:
-        transition: Single transition matrix.
-        x_prev: Previous state.
-        x_curr: Current state.
-        sigma_sqr: Variance.
-        
-    Returns:
-        Log probability.
-    """
-    mu = forward(transition, x_prev)
-    return gaussian_loglike(x_curr, mu, sigma_sqr)
-
-
-def compute_logprobs_masked_vmap(transitions, used_mask, x_prev, x_curr, sigma_sqr):
-    """Compute log probabilities with masking using vmap.
-    
-    Args:
-        transitions: Transition matrices.
-        used_mask: Used component mask.
-        x_prev: Previous state.
-        x_curr: Current state.
-        sigma_sqr: Variance.
-        
-    Returns:
-        Log probabilities (masked components get -inf).
-    """
-    def compute_logprob_if_used(transition, mask, x_p, x_c):
-        return lax.cond(
-            mask,
-            lambda t: single_logprob(t, x_p, x_c, sigma_sqr),
-            lambda _: -jnp.inf,
-            transition,
-        )
-
-    return jax.vmap(compute_logprob_if_used, in_axes=(0, 0, None, None))(
-        transitions, used_mask, x_prev, x_curr
-    )
-
-
-def compute_logprobs_masked_fori(transitions, used_mask, x_prev, x_curr, sigma_sqr=2):
-    """
-    Compute log probabilities with masking using fori_loop.
-    
-    Args:
-        transitions: (K_max, 2*state_dim, 2*state_dim + 1) transition matrices.
-        used_mask: (K_max,) boolean mask.
-        x_prev, x_curr: (2*state_dim,) state vectors.
-        sigma_sqr: Variance.
-        
-    Returns:
-        Log probabilities (K_max,).
-    """
-    K_max = transitions.shape[0]
-
-    def body_fn(i, logps):
-        logp_i = jax.lax.cond(
-            used_mask[i],
-            lambda t: single_logprob(t, x_prev, x_curr, sigma_sqr),
-            lambda _: -jnp.inf,
-            transitions[i],
-        )
-        return logps.at[i].set(logp_i)
-
-    logps_init = jnp.full((K_max,), -jnp.inf)
-    logps = jax.lax.fori_loop(0, K_max, body_fn, logps_init)
-    return logps
-
-
-def update_transitions(
-    transitions,
-    x_prev,
-    x_curr,
-    used_mask,
-    sigma_sqr=2.0,
-    logp_thr=-0.001,
-    pos_thr=0.5,
-    dt=1.0,
-    use_unused_counter=False,
-    use_velocity=True,
-    clip_value=5e-4,
-):
-    """
-    Update transitions with new component if needed.
-    
-    Args:
-        transitions: Transition matrices.
-        x_prev: Previous state.
-        x_curr: Current state.
-        used_mask: Used component mask.
-        sigma_sqr: Variance.
-        logp_thr: Log probability threshold for adding new component.
-        pos_thr: Position threshold.
-        dt: Time step.
-        use_unused_counter: Whether to use unused counter.
-        use_velocity: Whether to use velocity.
-        clip_value: Small value to clip.
-        
-    Returns:
-        Tuple of (transitions, used_mask, logprobs).
-    """
-    # shape (K_used,)
-    logprobs_all = compute_logprobs(
-        transitions, x_prev, x_curr, sigma_sqr, use_velocity
-    )
-
-    # 2) Replace the "unused" transitions' logprobs with -∞
-    logprobs_used = jnp.where(used_mask, logprobs_all, -jnp.inf)
-
-    # 3) The maximum over used transitions
-    max_used = logprobs_used.max()
-
-    # 4) If the max used is < threshold, we add new component
-    def add_component_case(trans):
-        return add_vel_or_bias_component(
-            trans,
-            x_prev,
-            x_curr,
-            used_mask,
-            pos_thr,
-            dt=dt,
-            use_unused_counter=use_unused_counter,
-            use_velocity=use_velocity,
-            clip_value=clip_value,
-        )
-
-    def no_op_case(trans):
-        return trans
-
-    transitions = jax.lax.cond(
-        max_used < logp_thr, add_component_case, no_op_case, transitions
-    )
-
-    used_mask = jnp.sum(jnp.abs(transitions), axis=(-1, -2)) > 0
-
-    # recompute logprobs with new mask
-    logprobs_all = compute_logprobs(
-        transitions, x_prev, x_curr, sigma_sqr, use_velocity
-    )
-    logprobs_used = jnp.where(used_mask, logprobs_all, -jnp.inf)
-
-    return transitions, used_mask, logprobs_used
-
-
-def create_tmm(
-    key,
-    n_total_components,
-    state_dim,
-    dt=1.0,
-    vu=0.1,
-    use_bias=True,
-    use_velocity=True,
-    device=None,
-    **kwargs,
-):
-    """
-    Create a Transition Mixture Model.
-    
-    Args:
-        key: Random key.
-        n_total_components: Total number of components.
-        state_dim: State dimension.
-        dt: Time step.
-        vu: Unused counter velocity.
-        use_bias: Whether to use bias.
-        use_velocity: Whether to use velocity components.
-        device: JAX device to use.
-        **kwargs: Additional arguments.
-        
-    Returns:
-        TMM: Initialized Transition Mixture Model.
-    """
-    transitions = jnp.zeros(
-        (n_total_components, 2 * state_dim, 2 * state_dim + int(use_bias))
-    )
-    used_mask = jnp.zeros(n_total_components, dtype=bool)
-
-    if use_velocity:
-        # In case we use velocity, we initialize some sensible default components
-        transitions = transitions.at[0].set(
-            generate_default_dynamics_component(state_dim, dt=dt, use_bias=use_bias)
-        )
-        transitions = transitions.at[1].set(
-            generate_default_keep_unused_component(
-                state_dim, dt=dt, vu=vu, use_bias=use_bias
-            )
-        )
-        transitions = transitions.at[2].set(
-            generate_default_become_unused_component(
-                state_dim, dt=dt, vu=vu, use_bias=use_bias
-            )
-        )
-        transitions = transitions.at[3].set(
-            generate_default_stop_component(state_dim, use_bias)
-        )
-
-        used_mask = used_mask.at[:4].set(True)
-    else:
-        transitions = transitions.at[0].set(
-            generate_default_keep_unused_component(
-                state_dim, dt=dt, vu=vu, use_bias=use_bias
-            )
-        )
-        transitions = transitions.at[1].set(
-            generate_default_become_unused_component(
-                state_dim, dt=dt, vu=vu, use_bias=use_bias
-            )
-        )
-        used_mask = used_mask.at[:2].set(True)
-
-    tmm = TMM(transitions=transitions, used_mask=used_mask)
-    
-    # Move to device if specified
-    if device is not None:
-        tmm = to_device(tmm, device)
-    
-    return tmm
-
-
-def update_model(
-    model,
-    x_prev,
-    x_curr,
-    state_dim=2,
-    sigma_sqr=2.0,
-    logp_threshold=-0.001,
-    position_threshold=0.5,
-    dt=1.0,
-    use_unused_counter=False,
-    use_velocity=True,
-    clip_value=5e-4,
-    **kwargs,
-):
-    """
-    Update TMM model with new transition.
-    
-    Args:
-        model: TMM model.
-        x_prev: Previous state.
-        x_curr: Current state.
-        state_dim: State dimension.
-        sigma_sqr: Variance.
-        logp_threshold: Threshold for adding new component.
-        position_threshold: Position threshold.
-        dt: Time step.
-        use_unused_counter: Whether to use unused counter.
-        use_velocity: Whether to use velocity.
-        clip_value: Small value to clip.
-        
-    Returns:
-        Tuple of (updated_model, logprobs).
-    """
-    logp_threshold_adjust = logp_threshold * (
-        1.0 / 2 * sigma_sqr
-    ) - 0.5 * 2 * state_dim * jnp.log(2 * jnp.pi * sigma_sqr)
-
-    new_transitions, new_used_mask, logprobs = update_transitions(
-        model.transitions,
-        x_prev,
-        x_curr,
-        model.used_mask,
-        sigma_sqr,
-        logp_threshold_adjust,
-        position_threshold,
-        dt=dt,
-        use_unused_counter=use_unused_counter,
-        use_velocity=use_velocity,
-        clip_value=clip_value,
-    )
-
-    model = eqx.tree_at(
-        lambda x: (x.transitions, x.used_mask), model, (new_transitions, new_used_mask)
-    )
-
-    return model, logprobs

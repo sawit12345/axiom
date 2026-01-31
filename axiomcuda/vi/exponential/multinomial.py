@@ -14,14 +14,12 @@
 # limitations under the License.
 
 from typing import Optional
-from jaxtyping import Array
-from multimethod import multimethod
+import numpy as np
+from scipy.special import softmax, logsumexp
 
-from jax import numpy as jnp, nn
-
-from axiomcuda.vi import ArrayDict, Delta, Distribution
+from axiomcuda.vi import ArrayDict, Delta
 from axiomcuda.vi.exponential import ExponentialFamily
-from axiomcuda.vi.utils import params_to_tx, sum_pytrees, stable_logsumexp
+from axiomcuda.vi.utils import params_to_tx
 
 DEFAULT_EVENT_DIM = 1
 
@@ -38,7 +36,7 @@ class Multinomial(ExponentialFamily):
         batch_shape: Optional[tuple] = None,
         event_shape: Optional[tuple] = None,
         event_dim: Optional[int] = DEFAULT_EVENT_DIM,
-        input_logZ: Optional[Array] = 0.0,
+        input_logZ: float = 0.0,
         **parent_kwargs,
     ):
         if event_shape is not None:
@@ -63,49 +61,50 @@ class Multinomial(ExponentialFamily):
             **parent_kwargs,
         )
 
-        self._logZ = stable_logsumexp(self.logits, dims=tuple(range(-self.event_dim, 0)), keepdims=True) + input_logZ
+        # Compute log normalizer using scipy
+        self._logZ = logsumexp(self.logits, axis=tuple(range(-self.event_dim, 0)), keepdims=True) + input_logZ
 
     @staticmethod
     def init_default_params(batch_shape, event_shape) -> ArrayDict:
         """Initialize default canonical parameters."""
         dim = event_shape[-DEFAULT_EVENT_DIM]
-        return ArrayDict(logits=jnp.zeros(batch_shape + event_shape[:-DEFAULT_EVENT_DIM] + (dim,)))
+        return ArrayDict(logits=np.zeros(batch_shape + event_shape[:-DEFAULT_EVENT_DIM] + (dim,)))
 
     @property
-    def logits(self) -> Array:
+    def logits(self) -> np.ndarray:
         """Returns log probabilities."""
         return self.nat_params.logits
 
     @property
-    def log_normalizer(self) -> Array:
+    def log_normalizer(self) -> np.ndarray:
         """Returns the log normalizer."""
         if self._logZ is not None:
             return self._logZ
         else:
-            logZ = stable_logsumexp(self.logits, dims=tuple(range(-self.event_dim, 0)), keepdims=True)
+            logZ = logsumexp(self.logits, axis=tuple(range(-self.event_dim, 0)), keepdims=True)
             self._logZ = logZ
             return logZ
 
     @property
-    def mean(self) -> Array:
+    def mean(self) -> np.ndarray:
         """Returns probabilities."""
-        return jnp.nan_to_num(nn.softmax(self.logits, axis=tuple(range(-self.event_dim, 0))))
+        return np.nan_to_num(softmax(self.logits, axis=tuple(range(-self.event_dim, 0))))
 
     @property
-    def variance(self) -> Array:
+    def variance(self) -> np.ndarray:
         """Variance of the Multinomial distribution."""
-        return jnp.diag(self.mean) - self.mean @ self.mean.mT
+        return np.diag(self.mean) - self.mean @ self.mean.T
 
     @property
-    def log_mean(self) -> Array:
+    def log_mean(self) -> np.ndarray:
         """Computes the log mean."""
         return self.logits - self.log_normalizer
 
-    def log_likelihood(self, x: Array) -> Array:
+    def log_likelihood(self, x: np.ndarray) -> np.ndarray:
         """Computes the log likelihood."""
         return self.sum_events(x * (self.logits - self.log_normalizer))
 
-    def statistics(self, x: Array) -> ArrayDict:
+    def statistics(self, x: np.ndarray) -> ArrayDict:
         """Computes sufficient statistics T(x) = x."""
         return ArrayDict(x=x)
 
@@ -113,46 +112,43 @@ class Multinomial(ExponentialFamily):
         """Computes expected sufficient statistics."""
         return ArrayDict(x=self.mean)
 
-    def log_partition(self) -> Array:
+    def log_partition(self) -> np.ndarray:
         """Computes log partition function."""
         return self.log_normalizer
 
-    def log_measure(self, x: Array) -> Array:
+    def log_measure(self, x: np.ndarray) -> float:
         """Computes log measure."""
         return 0.0
 
-    def expected_log_measure(self) -> Array:
+    def expected_log_measure(self) -> float:
         """Computes expected log base measure."""
         return 0.0
 
-    def entropy(self) -> Array:
+    def entropy(self) -> np.ndarray:
         """Computes entropy."""
         return -self.sum_events(self.mean * self.log_mean)
 
-    def expected_x(self) -> Array:
+    def expected_x(self) -> np.ndarray:
         """Computes <x>."""
-        return jnp.expand_dims(self.mean, -1)
+        return np.expand_dims(self.mean, -1)
 
-    def expected_xx(self) -> Array:
-        """Computes <xxᵀ>."""
-        return jnp.diag(self.mean)
+    def expected_xx(self) -> np.ndarray:
+        """Computes <xxT>."""
+        return np.diag(self.mean)
 
     def params_from_statistics(self, stats: ArrayDict) -> ArrayDict:
         """Computes inverse of expected_statistics."""
-        return ArrayDict(logits=jnp.log(stats.x))
+        return ArrayDict(logits=np.log(stats.x))
 
     def _update_cache(self):
         """Invoked when natural parameters are updated."""
         pass
 
-    @multimethod
-    def __mul__(self, other: Delta) -> Delta:
-        """Overloads * operator for Delta."""
-        return other.copy()
-
-    @multimethod
-    def __mul__(self, other: Distribution):
+    def __mul__(self, other):
         """Overloads * operator for combining Multinomials."""
+        if isinstance(other, Delta):
+            return other.copy()
+        
         if not isinstance(other, self.__class__):
             raise ValueError(f"Cannot multiply {type(self)} with {type(other)}")
 
