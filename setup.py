@@ -35,6 +35,10 @@ from setuptools import setup, Extension, find_packages
 from setuptools.command.build_ext import build_ext
 
 
+# Package version
+__version__ = "0.1.2"
+
+
 class CMakeExtension(Extension):
     """CMake extension for building C++/CUDA code."""
     
@@ -84,6 +88,8 @@ class CMakeBuild(build_ext):
             "/usr/local/cuda",
             "/opt/cuda",
             "/usr/lib/cuda",
+            "/usr/local/cuda-12.6",
+            "/usr/local/cuda-12.5",
             "/usr/local/cuda-12.4",
             "/usr/local/cuda-12.3",
             "/usr/local/cuda-12.2",
@@ -114,14 +120,24 @@ class CMakeBuild(build_ext):
         cfg = "Debug" if self.debug else "Release"
         
         # CMake arguments
+        use_cuda = os.environ.get("USE_CUDA", "ON")
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
             "-DBUILD_PYTHON_BINDINGS=ON",
             "-DBUILD_TESTS=OFF",
-            "-DUSE_CUDA=ON",
+            f"-DUSE_CUDA={use_cuda}",
         ]
+        
+        # Add pybind11 cmake path if available
+        try:
+            import pybind11
+            pybind11_cmake_dir = pybind11.get_cmake_dir()
+            cmake_args.append(f"-Dpybind11_DIR={pybind11_cmake_dir}")
+            print(f"Using pybind11 from: {pybind11_cmake_dir}")
+        except ImportError:
+            print("WARNING: pybind11 not available for import")
         
         # CUDA architecture flags from environment
         cuda_arch = os.environ.get("TORCH_CUDA_ARCH_LIST") or os.environ.get("CUDA_ARCHITECTURES")
@@ -143,6 +159,7 @@ class CMakeBuild(build_ext):
         
         # Run CMake configuration
         print(f"Configuring CMake in {build_temp}...")
+        print(f"CMake source directory: {ext.sourcedir}")
         subprocess.run(
             ["cmake", ext.sourcedir] + cmake_args,
             cwd=build_temp,
@@ -191,7 +208,7 @@ def read_readme() -> str:
 # Setup configuration
 setup(
     name="axiomcuda",
-    version="0.1.0",
+    version=__version__,
     author="VERSES Research",
     author_email="verses.research@verses.ai",
     description="AXIOMCUDA: High-performance C++/CUDA backend for AXIOM - Learning to Play Games with Object-Centric Models",
@@ -200,12 +217,15 @@ setup(
     url="https://github.com/VersesTech/axiom",
     license="VERSES Academic Research License",
     license_files=("LICENSE",),
-    packages=find_packages(include=["axiomcuda", "axiomcuda.*"]),
-    package_dir={"axiomcuda": "axiomcuda"},
-    ext_modules=[CMakeExtension("axiomcuda_backend", sourcedir=".")],
+    packages=find_packages(include=["axiomcuda", "axiomcuda.*", "gameworld", "gameworld.*"]),
+    package_dir={
+        "axiomcuda": "axiomcuda",
+        "gameworld": "gameworld",
+    },
+    ext_modules=[CMakeExtension("axiomcuda.axiomcuda_backend", sourcedir=".")],
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
-    python_requires=">=3.10,<3.12",
+    python_requires=">=3.10,<3.13",
     install_requires=[
         "numpy>=1.20.0",
         "opencv-python>=4.10.0",
@@ -214,7 +234,8 @@ setup(
         "moviepy>=1.0.3",
         "rich>=13.0.0",
         "multimethod>=1.12",
-        "gameworld>=0.1.0",
+        "gymnasium>=0.28",
+        "scipy>=1.10.0",
     ],
     extras_require={
         "cuda": [
@@ -244,6 +265,7 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Programming Language :: C++",
         "Programming Language :: CUDA",
         "Operating System :: POSIX :: Linux",

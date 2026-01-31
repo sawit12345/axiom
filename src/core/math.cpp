@@ -201,7 +201,7 @@ void logsumexp_dim(const double* input, double* output,
     }
 }
 
-void softmax(const double* input, double* output, size_t n, const bool* mask) {
+void softmax(const double* input, double* output, size_t n, const char* mask) {
     if (n == 0) return;
     
     // Find max for numerical stability
@@ -211,10 +211,10 @@ void softmax(const double* input, double* output, size_t n, const bool* mask) {
         size_t first = 0;
         while (first < n && mask[first]) first++;
         if (first >= n) return;  // All masked
-        
+
         max_val = input[first];
         for (size_t i = first + 1; i < n; ++i) {
-            if (!mask[i] && input[i] > max_val) {
+            if (mask[i] == 0 && input[i] > max_val) {
                 max_val = input[i];
             }
         }
@@ -227,12 +227,14 @@ void softmax(const double* input, double* output, size_t n, const bool* mask) {
     
     // Compute exp(x - max)
     double sum_exp = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        if (!mask || !mask[i]) {
-            output[i] = std::exp(input[i] - max_val);
-            sum_exp += output[i];
-        } else {
-            output[i] = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            if (!mask || mask[i] == 0) {
+                double exp_val = std::exp(input[i] - max_val);
+                output[i] = exp_val;
+                sum += exp_val;
+            } else {
+                output[i] = 0.0;
+            }
         }
     }
     
@@ -254,20 +256,20 @@ void softmax_dim(const double* input, double* output,
         // Apply softmax along dimension for this batch
         // Collect values
         std::vector<double> vals(dim_size);
-        std::vector<bool> local_mask;
+        std::vector<char> local_mask;
         if (mask) {
             local_mask.resize(dim_size);
             for (size_t i = 0; i < dim_size; ++i) {
-                local_mask[i] = mask[b * dim_size + i];
+                local_mask[i] = mask[b * dim_size + i] ? 1 : 0;
             }
         }
-        
+
         for (size_t i = 0; i < dim_size; ++i) {
             vals[i] = batch_in[i * stride];
         }
-        
+
         std::vector<double> out_vals(dim_size);
-        softmax(vals.data(), out_vals.data(), dim_size, 
+        softmax(vals.data(), out_vals.data(), dim_size,
                 mask ? local_mask.data() : nullptr);
         
         for (size_t i = 0; i < dim_size; ++i) {

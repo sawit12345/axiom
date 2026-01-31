@@ -120,8 +120,8 @@ endif()
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/include/
     DESTINATION include
-    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
     OPTIONAL
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
 
 # Install the CMake config file for find_package support

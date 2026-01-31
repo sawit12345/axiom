@@ -14,25 +14,57 @@
 # limitations under the License.
 
 cmake_minimum_required(VERSION 3.18)
-project(axiomcuda_backend VERSION 0.1.0 LANGUAGES CXX CUDA)
+
+# Options must come before project() to conditionally enable CUDA
+option(BUILD_TESTS "Build tests" ON)
+option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
+option(USE_CUDA "Enable CUDA support" ON)
+option(CUDA_DEBUG "Enable CUDA debug info" OFF)
+
+# Check for CUDA availability
+if(USE_CUDA)
+    find_package(CUDAToolkit QUIET)
+    if(NOT CUDAToolkit_FOUND)
+        find_package(CUDA QUIET)
+    endif()
+    if(NOT CUDA_FOUND AND NOT CUDAToolkit_FOUND)
+        message(WARNING "CUDA not found. Building with CPU-only support.")
+        set(USE_CUDA OFF)
+    endif()
+endif()
+
+# Project declaration - conditionally enable CUDA language
+if(USE_CUDA)
+    project(axiomcuda_backend VERSION 0.1.0 LANGUAGES CXX CUDA)
+else()
+    project(axiomcuda_backend VERSION 0.1.0 LANGUAGES CXX)
+endif()
 
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# CUDA Standard
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-
-# Options
-option(BUILD_TESTS "Build tests" ON)
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
-option(USE_CUDA "Enable CUDA support" ON)
-option(CUDA_DEBUG "Enable CUDA debug info" OFF)
+# CUDA Standard (only when CUDA is enabled)
+if(USE_CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+endif()
 
 # Find packages
-find_package(CUDA REQUIRED)
+if(USE_CUDA)
+    if(CUDAToolkit_FOUND)
+        # Modern CUDA toolkit
+        set(CUDA_INCLUDE_DIRS ${CUDAToolkit_INCLUDE_DIRS})
+        set(CUDA_LIBRARIES CUDA::cudart)
+        set(CUDA_CUBLAS_LIBRARIES CUDA::cublas)
+        set(CUDA_CUSOLVER_LIBRARIES CUDA::cusolver)
+        set(CUDA_CURAND_LIBRARIES CUDA::curand)
+    else()
+        # Legacy FindCUDA
+        find_package(CUDA REQUIRED)
+    endif()
+endif()
 find_package(pybind11 REQUIRED)
 
 # CUDA configuration
@@ -66,55 +98,60 @@ set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 
 # Include directories
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CUDA_INCLUDE_DIRS}
-    ${pybind11_INCLUDE_DIRS}
-)
+if(USE_CUDA)
+    include_directories(
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CUDA_INCLUDE_DIRS}
+        ${pybind11_INCLUDE_DIRS}
+    )
+else()
+    include_directories(
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${pybind11_INCLUDE_DIRS}
+    )
+endif()
 
 # Source files
 set(CORE_SOURCES
-    src/core/math.cpp
-    src/core/tensor.cpp
-    src/core/utils.cpp
+    core/math.cpp
+    core/tensor.cpp
+    core/linalg.cpp
+    core/random.cpp
 )
 
 set(CUDA_SOURCES
-    src/cuda/kernels.cu
-    src/cuda/math_kernels.cu
-    src/cuda/linear_algebra.cu
-    src/cuda/distribution_kernels.cu
+    core/cuda_kernels.cu
+    distributions/cuda_distributions.cu
+    models/cuda_models.cu
+    transforms/cuda_transforms.cu
 )
 
-set(VI_SOURCES
-    src/vi/distribution.cpp
-    src/vi/exponential/base.cpp
-    src/vi/exponential/mvn.cpp
-    src/vi/exponential/multinomial.cpp
-    src/vi/exponential/delta.cpp
-    src/vi/conjugate/base.cpp
-    src/vi/conjugate/mvn.cpp
-    src/vi/conjugate/multinomial.cpp
+set(DISTRIBUTION_SOURCES
+    distributions/distribution.cpp
+    distributions/exponential_family.cpp
 )
 
 set(TRANSFORM_SOURCES
-    src/transforms/transform.cpp
-    src/transforms/linear_mng.cpp
+    transforms/transform.cpp
+    transforms/linear_mng.cpp
+    transforms/types.cpp
 )
 
 set(MODEL_SOURCES
-    src/models/smm.cpp
-    src/models/rmm.cpp
-    src/models/tmm.cpp
-    src/models/imm.cpp
-    src/models/mixture.cpp
-    src/models/hybrid_mixture.cpp
+    models/smm.cpp
+    models/rmm.cpp
+    models/tmm.cpp
+    models/imm.cpp
+    models/mixture.cpp
+    models/hybrid_mixture.cpp
+    models/utils.cpp
 )
 
 # Create object libraries for each component
 add_library(core_objects OBJECT ${CORE_SOURCES})
-add_library(vi_objects OBJECT ${VI_SOURCES})
+add_library(distribution_objects OBJECT ${DISTRIBUTION_SOURCES})
 add_library(transform_objects OBJECT ${TRANSFORM_SOURCES})
 add_library(model_objects OBJECT ${MODEL_SOURCES})
 
@@ -128,24 +165,32 @@ if(USE_CUDA)
 endif()
 
 # Set properties for all object libraries
-set(OBJECT_LIBRARIES core_objects vi_objects transform_objects model_objects)
+set(OBJECT_LIBRARIES core_objects distribution_objects transform_objects model_objects)
 if(USE_CUDA)
     list(APPEND OBJECT_LIBRARIES cuda_objects)
 endif()
 
 foreach(target ${OBJECT_LIBRARIES})
-    target_include_directories(${target} PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-        $<INSTALL_INTERFACE:include>
-        ${CUDA_INCLUDE_DIRS}
-    )
+    if(USE_CUDA)
+        target_include_directories(${target} PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+            $<INSTALL_INTERFACE:include>
+            ${CUDA_INCLUDE_DIRS}
+        )
+    else()
+        target_include_directories(${target} PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+            $<INSTALL_INTERFACE:include>
+        )
+    endif()
 endforeach()
 
 # Main library (static)
 add_library(axiomcuda_static STATIC
     $<TARGET_OBJECTS:core_objects>
-    $<TARGET_OBJECTS:vi_objects>
+    $<TARGET_OBJECTS:distribution_objects>
     $<TARGET_OBJECTS:transform_objects>
     $<TARGET_OBJECTS:model_objects>
 )
@@ -161,17 +206,19 @@ set_target_properties(axiomcuda_static PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
-target_link_libraries(axiomcuda_static
-    ${CUDA_LIBRARIES}
-    ${CUDA_CUBLAS_LIBRARIES}
-    ${CUDA_CUSOLVER_LIBRARIES}
-    ${CUDA_CURAND_LIBRARIES}
-)
+if(USE_CUDA)
+    target_link_libraries(axiomcuda_static
+        ${CUDA_LIBRARIES}
+        ${CUDA_CUBLAS_LIBRARIES}
+        ${CUDA_CUSOLVER_LIBRARIES}
+        ${CUDA_CURAND_LIBRARIES}
+    )
+endif()
 
 # Main library (shared)
 add_library(axiomcuda_shared SHARED
     $<TARGET_OBJECTS:core_objects>
-    $<TARGET_OBJECTS:vi_objects>
+    $<TARGET_OBJECTS:distribution_objects>
     $<TARGET_OBJECTS:transform_objects>
     $<TARGET_OBJECTS:model_objects>
 )
@@ -188,12 +235,14 @@ set_target_properties(axiomcuda_shared PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
-target_link_libraries(axiomcuda_shared
-    ${CUDA_LIBRARIES}
-    ${CUDA_CUBLAS_LIBRARIES}
-    ${CUDA_CUSOLVER_LIBRARIES}
-    ${CUDA_CURAND_LIBRARIES}
-)
+if(USE_CUDA)
+    target_link_libraries(axiomcuda_shared
+        ${CUDA_LIBRARIES}
+        ${CUDA_CUBLAS_LIBRARIES}
+        ${CUDA_CUSOLVER_LIBRARIES}
+        ${CUDA_CURAND_LIBRARIES}
+    )
+endif()
 
 # Python bindings
 if(BUILD_PYTHON_BINDINGS)
@@ -207,11 +256,15 @@ if(BUILD_PYTHON_BINDINGS)
     
     target_link_libraries(axiomcuda_backend PRIVATE
         axiomcuda_static
-        ${CUDA_LIBRARIES}
-        ${CUDA_CUBLAS_LIBRARIES}
-        ${CUDA_CUSOLVER_LIBRARIES}
-        ${CUDA_CURAND_LIBRARIES}
     )
+    if(USE_CUDA)
+        target_link_libraries(axiomcuda_backend PRIVATE
+            ${CUDA_LIBRARIES}
+            ${CUDA_CUBLAS_LIBRARIES}
+            ${CUDA_CUSOLVER_LIBRARIES}
+            ${CUDA_CURAND_LIBRARIES}
+        )
+    endif()
     
     set_target_properties(axiomcuda_backend PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../axiomcuda

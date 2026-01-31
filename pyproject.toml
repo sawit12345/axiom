@@ -25,14 +25,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axiomcuda"
-version = "0.1.0"
+version = "0.1.2"
 authors = [
     {name = "VERSES Research", email = "verses.research@verses.ai"},
 ]
 description = "AXIOMCUDA: High-performance C++/CUDA backend for AXIOM - Learning to Play Games with Object-Centric Models"
 readme = "README.md"
 license = {text = "VERSES Academic Research License"}
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 keywords = [
     "machine learning",
     "probabilistic inference",
@@ -52,6 +52,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: C++",
     "Programming Language :: CUDA",
     "Operating System :: POSIX :: Linux",
@@ -64,7 +65,9 @@ dependencies = [
     "moviepy>=1.0.3",
     "rich>=13.0.0",
     "multimethod>=1.12",
-    "gameworld>=0.1.0",
+    "gymnasium>=0.28",
+    "scipy>=1.10.0",
+    # "gameworld>=0.1.0",  # Optional dependency for gameworld benchmark
 ]
 
 [project.optional-dependencies]
@@ -93,7 +96,7 @@ Repository = "https://github.com/VersesTech/axiom.git"
 "Bug Tracker" = "https://github.com/VersesTech/axiom/issues"
 
 [tool.setuptools]
-packages = ["axiomcuda"]
+packages = ["axiomcuda", "gameworld"]
 
 [tool.setuptools.package-data]
 axiomcuda = ["*.so", "*.pyd", "*.dll", "*.dylib"]
@@ -103,10 +106,10 @@ axiom = ["*"]
 
 [tool.black]
 line-length = 100
-target-version = ['py310', 'py311']
+target-version = ['py310', 'py311', 'py312']
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 
