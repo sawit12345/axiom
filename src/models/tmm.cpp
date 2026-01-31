@@ -43,14 +43,18 @@ void TMMState::copyFromDevice() {
 }
 
 TransitionMixtureModel::TransitionMixtureModel(const TMMState& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#endif
     
     logprobs_buffer_.shape = {state_.n_total_components};
     logprobs_buffer_.allocate(logprobs_buffer_.shape, true);
 }
 
 TransitionMixtureModel::~TransitionMixtureModel() {
+#ifdef USE_CUDA
     cudaStreamDestroy(stream_);
+#endif
 }
 
 void TransitionMixtureModel::forward(const Tensor& transitions,

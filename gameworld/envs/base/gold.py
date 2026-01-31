@@ -39,7 +39,7 @@ class Gold(GameworldEnv):
             low=0, high=255, shape=(210, 160, 3), dtype=np.uint8
         )
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         self.player_x = self.width // 2 - self.player_width // 2
         self.player_y = self.height // 2 - self.player_height // 2
         self.items = []

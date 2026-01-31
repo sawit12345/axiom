@@ -227,7 +227,7 @@ class HybridMixture(eqx.Module):
             )
 
     def _m_step_keep_unused(self, c_data: Array, d_data: List[Array], qz: Array):
-        model_updated: HybridMixture = jax.tree_map(lambda x: x, self)
+        model_updated: HybridMixture = jax.tree.map(lambda x: x, self)
         model_updated._m_step(c_data, d_data, qz)
 
         # 0.25 ensures that it only overwrites if the component is actually used

@@ -9,7 +9,14 @@
 
 #include <vector>
 #include <memory>
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#else
+// Stub for cudaStream_t when CUDA is not available
+typedef void* cudaStream_t;
+#endif
+
 #include "utils.h"
 
 namespace axiom {
@@ -90,8 +97,8 @@ public:
     // Assign unused components
     void assignUnused(const Tensor& elbo_contrib,
                      const Tensor& posterior,
-                     float d_alpha_thr = 1.0f,
-                     float fill_value = 1.0f,
+                     float d_alpha_thr,
+                     float fill_value,
                      Tensor& out_posterior);
     
     // Merge two components

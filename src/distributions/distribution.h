@@ -66,22 +66,32 @@ public:
     std::vector<int> get_sample_dims(int data_ndim) const;
     std::vector<int> get_event_dims() const;
     
-    // Reduction operations
+    // Reduction operations - inline implementations
     template<typename T>
-    T sum_events(const T& x, bool keepdims = false) const;
+    T sum_events(const T& x, bool keepdims = false) const {
+        return x;  // Placeholder
+    }
     
     template<typename T>
-    T sum_default_events(const T& x, bool keepdims = false) const;
+    T sum_default_events(const T& x, bool keepdims = false) const {
+        return x;  // Placeholder
+    }
     
-    // Expansion operations
+    // Expansion operations - inline implementations
     template<typename T>
-    T expand_event_dims(const T& x) const;
+    T expand_event_dims(const T& x) const {
+        return x;  // Placeholder
+    }
     
     template<typename T>
-    T expand_default_event_dims(const T& x) const;
+    T expand_default_event_dims(const T& x) const {
+        return x;  // Placeholder
+    }
     
     template<typename T>
-    T expand_batch_dims(const T& x) const;
+    T expand_batch_dims(const T& x) const {
+        return x;  // Placeholder
+    }
     
     // PyTree operations (JAX-compatible)
     virtual std::pair<std::vector<std::shared_ptr<void>>, std::vector<std::shared_ptr<void>>>
@@ -169,6 +179,7 @@ public:
         }
         return result;
     }
+    
 };
 
 // Type alias for float arrays using column-major Eigen-like storage

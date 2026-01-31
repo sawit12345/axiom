@@ -9,7 +9,15 @@
 
 #include <vector>
 #include <string>
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#else
+// Stub definitions for CUDA types when not available
+typedef int cudaError_t;
+#define cudaSuccess 0
+typedef void* cudaStream_t;
+#endif
 
 namespace axiom {
 namespace models {
@@ -155,12 +163,21 @@ void squaredError(const Tensor& pred, const Tensor& target, Tensor& out_error);
 void euclideanDistance(const Tensor& A, const Tensor& B, Tensor& out_dist);
 
 // CUDA utilities
+#ifdef USE_CUDA
 void setDevice(int device_id);
 int getDevice();
 void synchronize();
 void checkCudaError(cudaError_t error, const char* file, int line);
 
 #define CUDA_CHECK(err) checkCudaError(err, __FILE__, __LINE__)
+#else
+// No-op versions for non-CUDA builds
+inline void setDevice(int) {}
+inline int getDevice() { return 0; }
+inline void synchronize() {}
+inline void checkCudaError(cudaError_t, const char*, int) {}
+#define CUDA_CHECK(err) 
+#endif
 
 // Memory management
 class CudaMemoryPool {

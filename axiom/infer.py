@@ -457,7 +457,7 @@ def step_fn(
 
         def do_remap(rmm_model):
             # TODO update model, remapping old slots on the new data
-            model_updated = jax.tree_map(lambda x: x, imm_model.model)
+            model_updated = jax.tree.map(lambda x: x, imm_model.model)
 
             # first reset the slots to remap to prior params
             slots_to_wipe = identities.sum(axis=0)

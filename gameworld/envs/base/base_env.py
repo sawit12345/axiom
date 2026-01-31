@@ -6,7 +6,7 @@ class GameworldEnv(gym.Env):
     def __init__(self, **kwargs):
         super().__init__()
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         # override with reset logic
         return self._get_obs(), {}
 

@@ -34,7 +34,7 @@ class Jump(GameworldEnv):
 
         self.reset()
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         self.runner_y = self.ground_y - self.runner_height
         self.runner_vel_y = 0
         self.is_jumping = False

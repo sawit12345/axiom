@@ -81,7 +81,11 @@ void HybridMixtureStateHM::copyFromDevice() {
 }
 
 HybridMixtureModel::HybridMixtureModel(const HybridMixtureStateHM& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#else
+    stream_ = nullptr;
+#endif
     
     // Allocate buffers
     for (int i = 0; i < state_.num_discrete; ++i) {
@@ -93,7 +97,11 @@ HybridMixtureModel::HybridMixtureModel(const HybridMixtureStateHM& state) : stat
 }
 
 HybridMixtureModel::~HybridMixtureModel() {
-    cudaStreamDestroy(stream_);
+#ifdef USE_CUDA
+    if (stream_ != nullptr) {
+        cudaStreamDestroy(stream_);
+    }
+#endif
 }
 
 void HybridMixtureModel::trainingStep(const Tensor& c_data,

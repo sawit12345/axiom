@@ -17,6 +17,8 @@
 
 #pragma once
 
+#ifdef USE_CUDA
+
 #include <cuda_runtime.h>
 #include <cstdio>
 #include <cstdlib>
@@ -438,3 +440,5 @@ __device__ __forceinline__ int2 grid_stride_2d_step() {
 #endif // __CUDACC__
 
 } // namespace axiomcuda
+
+#endif // USE_CUDA

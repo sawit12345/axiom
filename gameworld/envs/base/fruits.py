@@ -46,7 +46,7 @@ class Fruits(GameworldEnv):
             low=0, high=255, shape=(self.height, self.width, 3), dtype=np.uint8
         )
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         # Reset player position
         self.player_x = self.width // 2 - self.player_width // 2
 

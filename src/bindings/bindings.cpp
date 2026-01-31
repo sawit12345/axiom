@@ -113,6 +113,6 @@ PYBIND11_MODULE(axiomcuda_backend, m) {
     }, "Check if CUDA is available");
     
     m.def("get_cuda_version", []() {
-        return std::string("12.0");  // Update based on actual version
+        return std::string("12.0");
     }, "Get the CUDA version");
 }

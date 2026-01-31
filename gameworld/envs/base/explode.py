@@ -36,7 +36,7 @@ class Explode(GameworldEnv):
             low=0, high=255, shape=(210, 160, 3), dtype=np.uint8
         )
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         self.player_x = self.width // 2 - self.bucket_width // 2
         self.bombs = []
 

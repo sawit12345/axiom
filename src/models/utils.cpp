@@ -6,12 +6,17 @@
  */
 
 #include "utils.h"
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cusolverDn.h>
+#endif
+
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 namespace axiom {
 namespace models {
@@ -40,7 +45,11 @@ void Tensor::allocate(const std::vector<int>& shape_, bool on_device_) {
     
     // Allocate memory
     if (on_device) {
+#ifdef USE_CUDA
         cudaMalloc(&data, size * sizeof(float));
+#else
+        data = new float[size];
+#endif
     } else {
         data = new float[size];
     }
@@ -49,7 +58,11 @@ void Tensor::allocate(const std::vector<int>& shape_, bool on_device_) {
 void Tensor::free() {
     if (data) {
         if (on_device) {
+#ifdef USE_CUDA
             cudaFree(data);
+#else
+            delete[] data;
+#endif
         } else {
             delete[] data;
         }
@@ -58,6 +71,7 @@ void Tensor::free() {
 }
 
 void Tensor::copyToDevice() {
+#ifdef USE_CUDA
     if (!on_device) {
         float* device_data;
         cudaMalloc(&device_data, size * sizeof(float));
@@ -66,9 +80,11 @@ void Tensor::copyToDevice() {
         data = device_data;
         on_device = true;
     }
+#endif
 }
 
 void Tensor::copyFromDevice() {
+#ifdef USE_CUDA
     if (on_device) {
         float* host_data = new float[size];
         cudaMemcpy(host_data, data, size * sizeof(float), cudaMemcpyDeviceToHost);
@@ -76,6 +92,7 @@ void Tensor::copyFromDevice() {
         data = host_data;
         on_device = false;
     }
+#endif
 }
 
 float& Tensor::operator()(const std::vector<int>& indices) {
@@ -359,6 +376,7 @@ void randomNormal(Tensor& A, float mean, float std, unsigned int seed) {
 }
 
 // CUDA utilities
+#ifdef USE_CUDA
 void setDevice(int device_id) {
     cudaSetDevice(device_id);
 }
@@ -379,8 +397,10 @@ void checkCudaError(cudaError_t error, const char* file, int line) {
         exit(1);
     }
 }
+#endif
 
 // Memory pool
+#ifdef USE_CUDA
 CudaMemoryPool& CudaMemoryPool::getInstance() {
     static CudaMemoryPool instance;
     return instance;
@@ -421,6 +441,7 @@ void CudaMemoryPool::clear() {
 CudaMemoryPool::~CudaMemoryPool() {
     clear();
 }
+#endif
 
 } // namespace models
 } // namespace axiom

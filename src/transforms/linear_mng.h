@@ -282,7 +282,7 @@ public:
     ArrayDict to_natural_params(const ArrayDict& params) const override;
     ArrayDict map_stats_to_params(const ArrayDict& likelihood_stats, const ArrayDict& counts) const override;
     std::shared_ptr<Transform> copy() const override;
-    void update_cache() override;
+    void update_cache() const override;
 
     // =================================================================
     // Static Methods
@@ -348,11 +348,11 @@ private:
     ArrayDict prior_natural_params_;
     
     // Cached values (mutable for lazy evaluation)
-    mutable ArrayDict cached_v_;
-    mutable ArrayDict cached_prior_v_;
-    mutable ArrayDict cached_b_;
-    mutable ArrayDict cached_logdet_inv_v_;
-    mutable ArrayDict cached_prior_logdet_inv_v_;
+    mutable Array cached_v_;
+    mutable Array cached_prior_v_;
+    mutable Array cached_b_;
+    mutable Array cached_logdet_inv_v_;
+    mutable Array cached_prior_logdet_inv_v_;
     mutable bool cache_valid_;
     
     // Constants

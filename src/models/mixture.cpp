@@ -61,14 +61,22 @@ void MixtureState::copyFromDevice() {
 }
 
 MixtureModel::MixtureModel(const MixtureState& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#else
+    stream_ = nullptr;
+#endif
     
     log_probs_buffer_.shape = {1, state_.num_components};
     log_probs_buffer_.allocate(log_probs_buffer_.shape, true);
 }
 
 MixtureModel::~MixtureModel() {
-    cudaStreamDestroy(stream_);
+#ifdef USE_CUDA
+    if (stream_ != nullptr) {
+        cudaStreamDestroy(stream_);
+    }
+#endif
 }
 
 void MixtureModel::eStep(const Tensor& data, Tensor& out_posterior) {

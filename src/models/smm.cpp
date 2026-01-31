@@ -6,9 +6,13 @@
  */
 
 #include "smm.h"
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cusolverDn.h>
+#endif
+
 #include <cmath>
 #include <algorithm>
 
@@ -115,7 +119,9 @@ void SMMState::copyFromDevice() {
 
 // SlotMixtureModel implementation
 SlotMixtureModel::SlotMixtureModel(const SMMState& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#endif
     
     // Allocate internal buffers
     int num_tokens = state_.width * state_.height;
@@ -127,7 +133,9 @@ SlotMixtureModel::SlotMixtureModel(const SMMState& state) : state_(state) {
 }
 
 SlotMixtureModel::~SlotMixtureModel() {
+#ifdef USE_CUDA
     cudaStreamDestroy(stream_);
+#endif
 }
 
 void SlotMixtureModel::eStep(const Tensor& inputs, int num_iterations) {
@@ -259,7 +267,7 @@ void SlotMixtureModel::variationalBackward(const Tensor& inputs,
                         // Simplified: use expected sufficient statistics
                         inv_sigma_kij += qz_nk * (i == j ? 1.0f : 0.0f);
                     }
-                    out_qx_inv_sigma.data[(b * num_slots + k) * state_.slot_dim * state_.slot_dim + i * state_.slot_dim + j] = inv_sigma_kij;
+                    out_qx_inv_sigma.data[(b * state_.num_slots + k) * state_.slot_dim * state_.slot_dim + i * state_.slot_dim + j] = inv_sigma_kij;
                 }
             }
         }

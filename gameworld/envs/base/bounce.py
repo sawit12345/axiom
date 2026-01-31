@@ -40,7 +40,7 @@ class Bounce(GameworldEnv):
             low=0, high=255, shape=(210, 160, 3), dtype=np.uint8
         )
 
-    def reset(self):
+    def reset(self, seed=None, options=None):
         self.ball_x = self.width // 2
         self.ball_y = self.height // 2
         self.opponent_y = self.height // 2 - self.paddle_height // 2

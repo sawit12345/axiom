@@ -78,6 +78,34 @@ enum class DeviceType {
 };
 
 // ============================================================================
+// Device Properties
+// ============================================================================
+
+struct DeviceProperties {
+    char name[256];
+    size_t totalMemory;
+    int major;
+    int minor;
+    int multiProcessorCount;
+    int maxThreadsPerBlock;
+    int warpSize;
+};
+
+// ============================================================================
+// Device Manager
+// ============================================================================
+
+class DeviceManager {
+public:
+    static int getDeviceCount();
+    static int getCurrentDevice();
+    static void setDevice(int device_id);
+    static void synchronize(int device_id = -1);
+    static DeviceProperties getDeviceProperties(int device_id = 0);
+    static std::pair<size_t, size_t> getMemoryInfo(int device_id = -1);
+};
+
+// ============================================================================
 // Tensor Shape
 // ============================================================================
 
@@ -186,9 +214,16 @@ public:
     DataType dtype() const { return dtype_; }
     DeviceType device() const { return buffer_ ? buffer_->device() : DeviceType::CPU; }
     size_t numel() const { return shape_.numel(); }
+    size_t size() const { return numel(); }
+    size_t ndim() const { return shape_.ndim(); }
     size_t nbytes() const { return numel() * data_type_size(dtype_); }
     
     void* data() const { return buffer_ ? buffer_->data() : nullptr; }
+    
+    // Device as string
+    std::string device_str() const {
+        return is_cpu() ? "cpu" : "cuda";
+    }
     
     template<typename T>
     T* data() const { return static_cast<T*>(data()); }
@@ -212,6 +247,7 @@ public:
     
     // Clone
     Tensor clone() const;
+    Tensor copy() const { return clone(); }
     
     // Fill operations
     void fill(double value);
@@ -222,6 +258,13 @@ public:
     // View operations
     Tensor reshape(const Shape& new_shape) const;
     Tensor view(const Shape& new_shape) const { return reshape(new_shape); }
+    Tensor squeeze() const;
+    Tensor squeeze(int dim) const;
+    Tensor unsqueeze(int dim) const;
+    Tensor transpose() const;
+    Tensor transpose(int dim0, int dim1) const;
+    Tensor permute(const std::vector<int>& dims) const;
+    Tensor contiguous() const { return clone(); }
     
     // Slicing (future: implement actual views)
     // Tensor slice(size_t dim, size_t start, size_t end) const;
@@ -240,6 +283,22 @@ public:
         copy_to_host(&val);
         return val;
     }
+    
+    // Arithmetic operations
+    Tensor add(const Tensor& other) const;
+    Tensor subtract(const Tensor& other) const;
+    Tensor multiply(const Tensor& other) const;
+    Tensor divide(const Tensor& other) const;
+    Tensor power(double exponent) const;
+    Tensor negate() const;
+    
+    // Indexing (basic)
+    Tensor getitem(int index) const;
+    void setitem(int index, const Tensor& value);
+    
+    // NumPy interop
+    static Tensor from_numpy(const void* data, const std::vector<size_t>& shape);
+    void to_numpy(void* out_data) const;
     
     // Data validation
     bool is_valid() const { return buffer_ != nullptr && buffer_->data() != nullptr; }
@@ -282,8 +341,12 @@ void Tensor::copy_to_host(T* dst) const {
     if (is_cpu()) {
         std::memcpy(dst, data(), nbytes());
     } else {
+#ifdef USE_CUDA
         // Copy from CUDA to host
         d2h_copy(data<T>(), dst, numel());
+#else
+        throw std::runtime_error("CUDA not available");
+#endif
     }
 }
 
@@ -296,8 +359,12 @@ void Tensor::copy_from_host(const T* src) {
     if (is_cpu()) {
         std::memcpy(data(), src, nbytes());
     } else {
+#ifdef USE_CUDA
         // Copy from host to CUDA
         h2d_copy(src, data<T>(), numel());
+#else
+        throw std::runtime_error("CUDA not available");
+#endif
     }
 }
 

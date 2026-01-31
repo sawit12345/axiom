@@ -9,7 +9,14 @@
 
 #include <vector>
 #include <memory>
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#else
+// Stub for cudaStream_t when CUDA is not available
+typedef void* cudaStream_t;
+#endif
+
 #include "utils.h"
 
 namespace axiom {

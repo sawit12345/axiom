@@ -59,14 +59,18 @@ void IMMState::copyFromDevice() {
 }
 
 IdentityMixtureModel::IdentityMixtureModel(const IMMState& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#endif
     
     ell_buffer_.shape = {1, state_.num_object_types};
     ell_buffer_.allocate(ell_buffer_.shape, true);
 }
 
 IdentityMixtureModel::~IdentityMixtureModel() {
+#ifdef USE_CUDA
     cudaStreamDestroy(stream_);
+#endif
 }
 
 void IdentityMixtureModel::inferIdentity(const Tensor& x,

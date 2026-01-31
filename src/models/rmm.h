@@ -9,7 +9,14 @@
 
 #include <vector>
 #include <memory>
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#else
+// Stub for cudaStream_t when CUDA is not available
+typedef void* cudaStream_t;
+#endif
+
 #include "utils.h"
 
 namespace axiom {
@@ -144,6 +151,14 @@ private:
     void updateDiscrete(const std::vector<Tensor>& d_data,
                        const Tensor& qz,
                        float lr, float beta);
+    void updateContinuousLikelihood(const Tensor& c_data,
+                                   const Tensor& qz,
+                                   float lr,
+                                   float beta);
+    void updateDiscreteLikelihood(const std::vector<Tensor>& d_data,
+                                 const Tensor& qz,
+                                 float lr,
+                                 float beta);
     void sumComponents(const HybridMixtureState& other,
                       const Tensor& self_mask,
                       const Tensor& other_mask);

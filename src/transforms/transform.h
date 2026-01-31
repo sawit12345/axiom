@@ -321,7 +321,7 @@ public:
     /**
      * @brief Update internal cache after parameter changes
      */
-    virtual void update_cache() = 0;
+    virtual void update_cache() const = 0;
 };
 
 } // namespace transforms

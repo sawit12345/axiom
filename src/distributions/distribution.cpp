@@ -77,37 +77,6 @@ std::vector<int> Distribution::get_event_dims() const {
     return result;
 }
 
-template<typename T>
-T Distribution::sum_events(const T& x, bool keepdims) const {
-    // Implementation depends on array type - placeholder
-    // In practice, this would sum over the last event_dim dimensions
-    return x;
-}
-
-template<typename T>
-T Distribution::sum_default_events(const T& x, bool keepdims) const {
-    // Sum over default event dimensions
-    return x;
-}
-
-template<typename T>
-T Distribution::expand_event_dims(const T& x) const {
-    // Add singleton dimensions for event dims
-    return x;
-}
-
-template<typename T>
-T Distribution::expand_default_event_dims(const T& x) const {
-    // Add singleton dimensions for default event dims
-    return x;
-}
-
-template<typename T>
-T Distribution::expand_batch_dims(const T& x) const {
-    // Add batch dimensions
-    return x;
-}
-
 std::pair<std::vector<std::shared_ptr<void>>, std::vector<std::shared_ptr<void>>>
 Distribution::tree_flatten() const {
     std::vector<std::shared_ptr<void>> data_values;

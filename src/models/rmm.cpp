@@ -6,7 +6,11 @@
  */
 
 #include "rmm.h"
+
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#endif
+
 #include <cmath>
 #include <algorithm>
 
@@ -90,7 +94,9 @@ void HybridMixtureState::copyFromDevice() {
 
 // RewardMixtureModel implementation
 RewardMixtureModel::RewardMixtureModel(const HybridMixtureState& state) : state_(state) {
+#ifdef USE_CUDA
     cudaStreamCreate(&stream_);
+#endif
     
     // Allocate discrete ELL buffers
     for (int i = 0; i < state_.num_discrete; ++i) {
@@ -102,7 +108,9 @@ RewardMixtureModel::RewardMixtureModel(const HybridMixtureState& state) : state_
 }
 
 RewardMixtureModel::~RewardMixtureModel() {
+#ifdef USE_CUDA
     cudaStreamDestroy(stream_);
+#endif
 }
 
 void RewardMixtureModel::eStep(const Tensor& c_data,

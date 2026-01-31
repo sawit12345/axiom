@@ -143,7 +143,7 @@ class HybridMixture(eqx.Module):
             self.discrete_likelihoods[i].posterior_params = jtu.tree_map(combine_fn, self.discrete_likelihoods[i].prior_params, self.discrete_likelihoods[i].posterior_params)
 
     def _m_step_keep_unused(self, c_data: Array, d_data: List[Array], qz: Array):
-        model_updated: HybridMixture = jax.tree_map(lambda x: x, self)
+        model_updated: HybridMixture = jax.tree.map(lambda x: x, self)
         model_updated._m_step(c_data, d_data, qz)
         active_components = jnp.any(qz > 0.25, axis=0) & (model_updated.prior.alpha < 32)
         mask_updated = jnp.where(active_components, 1.0, 0.0)

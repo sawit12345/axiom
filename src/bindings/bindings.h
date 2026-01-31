@@ -22,12 +22,8 @@
 #include <vector>
 #include <memory>
 
-// Forward declarations
-namespace axiomcuda {
-    class Tensor;
-    class DeviceManager;
-    struct DeviceProperties;
-}
+// Include actual headers instead of forward declarations
+#include "../core/tensor.h"
 
 namespace py = pybind11;
 
@@ -87,7 +83,7 @@ namespace pybind11 { namespace detail {
 
 // Docstring helpers
 namespace docstrings {
-    const char* DISTRIBUTION_BASE = R"doc(
+    inline const char* DISTRIBUTION_BASE = R"doc(
         Base class for all probability distributions.
         
         Provides common functionality for:
@@ -96,7 +92,7 @@ namespace docstrings {
         - Statistical operations (entropy, log_partition, etc.)
     )doc";
     
-    const char* EXPONENTIAL_FAMILY = R"doc(
+    inline const char* EXPONENTIAL_FAMILY = R"doc(
         Exponential family distribution base class.
         
         Distributions in the exponential family have the form:
@@ -109,7 +105,7 @@ namespace docstrings {
         - A(eta) is the log partition function
     )doc";
     
-    const char* CONJUGATE_BASE = R"doc(
+    inline const char* CONJUGATE_BASE = R"doc(
         Conjugate prior distribution base class.
         
         Conjugate priors have the property that the posterior distribution

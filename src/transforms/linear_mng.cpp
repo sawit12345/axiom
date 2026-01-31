@@ -14,7 +14,11 @@
 // limitations under the License.
 
 #include "linear_mng.h"
+
+#ifdef USE_CUDA
 #include "cuda_transforms.cuh"
+#endif
+
 #include <stdexcept>
 #include <algorithm>
 #include <numeric>
@@ -338,7 +342,7 @@ ArrayDict LinearMatrixNormalGamma::get_bias() const {
 // Cache Management
 // ============================================================================
 
-void LinearMatrixNormalGamma::update_cache() {
+void LinearMatrixNormalGamma::update_cache() const {
     if (cache_valid_) return;
     
     // Compute V = inv(inv_v) for posterior
@@ -749,7 +753,7 @@ ArrayDict LinearMatrixNormalGamma::map_stats_to_params(
     mapped["eta_1"] = likelihood_stats.at("xx");
     mapped["eta_2"] = likelihood_stats.at("yx");
     mapped["eta_3"] = likelihood_stats.at("yy");
-    mapped["eta_4"] = counts;
+    mapped["eta_4"] = counts.at("ones");
     
     return mapped;
 }
@@ -897,9 +901,11 @@ ArrayDict LinearMatrixNormalGamma::elbo(
     
     ArrayDict result;
     if (weights) {
-        result["elbo"] = (ell["log_likelihood"] * weights->at("weights")).sum() - kl["kl_divergence"];
+        float elbo_val = (ell["log_likelihood"] * weights->at("weights")).sum() - kl["kl_divergence"].sum();
+        result["elbo"] = Array::full({1}, elbo_val);
     } else {
-        result["elbo"] = ell["log_likelihood"].sum() - kl["kl_divergence"];
+        float elbo_val = ell["log_likelihood"].sum() - kl["kl_divergence"].sum();
+        result["elbo"] = Array::full({1}, elbo_val);
     }
     return result;
 }
@@ -913,9 +919,11 @@ ArrayDict LinearMatrixNormalGamma::elbo_contrib(
     
     ArrayDict result;
     if (weights) {
-        result["elbo"] = (ae["average_energy"] * weights->at("weights")).sum() - kl["kl_divergence"];
+        float elbo_val = (ae["average_energy"] * weights->at("weights")).sum() - kl["kl_divergence"].sum();
+        result["elbo"] = Array::full({1}, elbo_val);
     } else {
-        result["elbo"] = ae["average_energy"].sum() - kl["kl_divergence"];
+        float elbo_val = ae["average_energy"].sum() - kl["kl_divergence"].sum();
+        result["elbo"] = Array::full({1}, elbo_val);
     }
     return result;
 }
