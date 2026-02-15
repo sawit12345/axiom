@@ -63,6 +63,37 @@ class ExperimentConfig:
     bmr_pairs: int = 2000  # number of pairs to use for Bayesian model reduction
 
 
+@dataclass(frozen=True)
+class InferenceConfig:
+    smm: smm.SMMConfig | Sequence[smm.SMMConfig]
+    imm: imm.IMMConfig
+    tmm: tmm.TMMConfig
+    rmm: rmm.RMMConfig
+    planner: planner.PlannerConfig | None
+    moving_threshold: Sequence[float]
+    used_threshold: Sequence[float]
+    min_track_steps: Sequence[int]
+    max_steps_tracked_unused: int
+    use_unused_counter: bool
+    layer_for_dynamics: int
+
+
+def to_inference_config(config: ExperimentConfig) -> InferenceConfig:
+    return InferenceConfig(
+        smm=config.smm,
+        imm=config.imm,
+        tmm=config.tmm,
+        rmm=config.rmm,
+        planner=config.planner,
+        moving_threshold=tuple(config.moving_threshold),
+        used_threshold=tuple(config.used_threshold),
+        min_track_steps=tuple(config.min_track_steps),
+        max_steps_tracked_unused=config.max_steps_tracked_unused,
+        use_unused_counter=config.use_unused_counter,
+        layer_for_dynamics=config.layer_for_dynamics,
+    )
+
+
 def parse_floats(s):
     try:
         return [float(item) for item in s.split(",")]

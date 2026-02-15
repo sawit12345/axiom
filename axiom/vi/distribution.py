@@ -298,11 +298,15 @@ class Distribution:
             A tuple of all pytree_data_fields found in the class hierarchy.
         """
         bases = inspect.getmro(cls)
-        all_pytree_data_fields = ()
+        all_pytree_data_fields = []
+        seen = set()
         for base in bases:
             if issubclass(base, Distribution):
-                all_pytree_data_fields += base.__dict__.get("pytree_data_fields", ())
-        return tuple(set(all_pytree_data_fields))
+                for field in base.__dict__.get("pytree_data_fields", ()):
+                    if field not in seen:
+                        seen.add(field)
+                        all_pytree_data_fields.append(field)
+        return tuple(all_pytree_data_fields)
 
     @classmethod
     def gather_pytree_aux_fields(cls):
@@ -316,11 +320,15 @@ class Distribution:
             A tuple of all pytree auxiliary fields from the base classes of the given class.
         """
         bases = inspect.getmro(cls)
-        all_pytree_aux_fields = ()
+        all_pytree_aux_fields = []
+        seen = set()
         for base in bases:
             if issubclass(base, Distribution):
-                all_pytree_aux_fields += base.__dict__.get("pytree_aux_fields", ())
-        return tuple(set(all_pytree_aux_fields))
+                for field in base.__dict__.get("pytree_aux_fields", ()):
+                    if field not in seen:
+                        seen.add(field)
+                        all_pytree_aux_fields.append(field)
+        return tuple(all_pytree_aux_fields)
 
     def tree_flatten(self):
         """Flattens the distribution into a tuple of data and auxiliary values.

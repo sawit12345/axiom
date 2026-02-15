@@ -14,6 +14,9 @@
 # limitations under the License.
 
 import sys
+import os
+import shutil
+from pathlib import Path
 import rich
 
 import mediapy
@@ -50,7 +53,25 @@ def _compute_reward_stats(rewards, window=1000):
     return reward_avgs, reward_sums
 
 
+def _configure_jax_cache():
+    cache_dir = os.environ.get("AXIOM_JAX_CACHE_DIR")
+    if cache_dir is None:
+        cache_dir = str(Path.home() / ".cache" / "axiom" / "jax")
+
+    os.makedirs(cache_dir, exist_ok=True)
+    jax.config.update("jax_compilation_cache_dir", cache_dir)
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+    jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+
+
+def _wandb_enabled():
+    mode = os.environ.get("WANDB_MODE", "").strip().lower()
+    return mode not in {"disabled", "off", "false", "0"}
+
+
 def main(config):
+    _configure_jax_cache()
+
     key = jr.PRNGKey(config.seed)
     np.random.seed(config.seed)
 
@@ -59,6 +80,7 @@ def main(config):
 
     # Create environment.
     env = gymnasium.make(f'Gameworld-{config.game}-v0', perturb=config.perturb, perturb_step=config.perturb_step)
+    infer_config = defaults.to_inference_config(config)
 
     observations = []
     rewards = []
@@ -71,11 +93,11 @@ def main(config):
     obs, _ = env.reset()
     obs = obs.astype(np.uint8)
     observations.append(obs)
-    reward = 0
+    reward = 0.0
 
     # initialize
     key, subkey = jr.split(key)
-    carry = ax.init(subkey, config, obs, env.action_space.n)
+    carry = ax.init(subkey, infer_config, obs, env.action_space.n)
 
     bmr_buffer = None, None
 
@@ -88,7 +110,9 @@ def main(config):
             expected_utility.append(0.0)
             expected_info_gain.append(0.0)
         else:
-            action, carry, plan_info = ax.plan_fn(subkey, carry, config, env.action_space.n)
+            action, carry, plan_info = ax.plan_fn(
+                subkey, carry, infer_config, env.action_space.n
+            )
 
             best = jnp.argmax(plan_info["rewards"][:, :, 0].sum(0))
             expected_utility.append(
@@ -131,11 +155,11 @@ def main(config):
             update = False
             remap_color = True
 
-        carry, rec = ax.step_fn(
+        carry, _ = ax.step_fn(
             carry,
-            config,
+            infer_config,
             obs,
-            jnp.array(reward),
+            jnp.asarray(reward, dtype=jnp.float32),
             action_arr,
             num_tracked=0,
             update=update,
@@ -146,13 +170,13 @@ def main(config):
             obs, _ = env.reset()
             obs = obs.astype(np.uint8)
             observations.append(obs)
-            reward = 0
+            reward = 0.0
 
-            carry, rec = ax.step_fn(
+            carry, _ = ax.step_fn(
                 carry,
-                config,
+                infer_config,
                 obs,
-                jnp.array(reward),
+                jnp.asarray(reward, dtype=jnp.float32),
                 jnp.array(0, dtype=jnp.int32),
                 num_tracked=0,
                 update=False,
@@ -203,64 +227,71 @@ def main(config):
             )
 
     observations_np = np.asarray(observations)
-    mediapy.write_video(f"{config.game.lower()}.mp4", observations_np, fps=30)
+    ffmpeg_available = shutil.which("ffmpeg") is not None
+    if ffmpeg_available:
+        mediapy.write_video(f"{config.game.lower()}.mp4", observations_np, fps=30)
+    else:
+        rich.print("[yellow]Skipping video export: ffmpeg not found in PATH.[/yellow]")
 
     # Do wandb logging after the job to avoid performance impact
-    wandb.init(
-        reinit=True,
-        group=config.group,
-        project=config.project,
-        config=config,
-        resume="allow",
-        id=config.id + "-" + config.game,
-        name=config.name + "-" + config.game,
-    )
-
-    for i in range(len(rewards_np)):
-        wandb.log(
-            {
-                "reward": rewards_np[i],
-                "reward_1k_avg": reward_1k_avg[i],
-                "cumulative_reward": reward_1k_sum[i],
-                "expected_utility": expected_utility_np[i],
-                "expected_info_gain": expected_info_gain_np[i],
-                "num_components": num_components_np[i],
-            }
+    if _wandb_enabled():
+        wandb.init(
+            reinit=True,
+            group=config.group,
+            project=config.project,
+            config=config,
+            resume="allow",
+            id=config.id + "-" + config.game,
+            name=config.name + "-" + config.game,
         )
 
-    # finally log a sample of final gameplay
-    logs = {
-        "play": wandb.Video(
-            observations_np[-1000:].transpose(0, 3, 1, 2),
-            fps=30,
-            format="mp4",
-        ),
-        "rmm": wandb.Image(
-            vis.plot_rmm(carry["rmm_model"], carry["imm_model"], colorize="cluster")
-        ),
-        "identities": wandb.Image(vis.plot_identity_model(carry["imm_model"])),
-    }
-
-    if plan_info is not None and len(observations) >= 2:
-        logs["plan"] = wandb.Image(
-            vis.plot_plan(
-                observations[-2],
-                plan_info,
-                carry["tracked_obj_ids"][config.layer_for_dynamics],
-                carry["smm_model"].stats,
-                topk=1,
+        for i in range(len(rewards_np)):
+            wandb.log(
+                {
+                    "reward": rewards_np[i],
+                    "reward_1k_avg": reward_1k_avg[i],
+                    "cumulative_reward": reward_1k_sum[i],
+                    "expected_utility": expected_utility_np[i],
+                    "expected_info_gain": expected_info_gain_np[i],
+                    "num_components": num_components_np[i],
+                }
             )
-        )
 
-    if config.perturb is not None:
-        start = max(0, config.perturb_step - 100)
-        end = min(observations_np.shape[0], config.perturb_step + 100)
-        logs["perturb"] = wandb.Video(
-            observations_np[start:end].transpose(0, 3, 1, 2),
-            fps=30,
-            format="mp4",
-        )
-    wandb.log(logs)
+        # finally log a sample of final gameplay
+        logs = {
+            "rmm": wandb.Image(
+                vis.plot_rmm(carry["rmm_model"], carry["imm_model"], colorize="cluster")
+            ),
+            "identities": wandb.Image(vis.plot_identity_model(carry["imm_model"])),
+        }
+
+        if ffmpeg_available:
+            logs["play"] = wandb.Video(
+                observations_np[-1000:].transpose(0, 3, 1, 2),
+                fps=30,
+                format="mp4",
+            )
+
+        if plan_info is not None and len(observations) >= 2:
+            logs["plan"] = wandb.Image(
+                vis.plot_plan(
+                    observations[-2],
+                    plan_info,
+                    carry["tracked_obj_ids"][config.layer_for_dynamics],
+                    carry["smm_model"].stats,
+                    topk=1,
+                )
+            )
+
+        if config.perturb is not None and ffmpeg_available:
+            start = max(0, config.perturb_step - 100)
+            end = min(observations_np.shape[0], config.perturb_step + 100)
+            logs["perturb"] = wandb.Video(
+                observations_np[start:end].transpose(0, 3, 1, 2),
+                fps=30,
+                format="mp4",
+            )
+        wandb.log(logs)
 
 
 if __name__ == "__main__":
