@@ -379,11 +379,14 @@ def load_config_raw(config_path):
 
 def load_config(config_path, seed=0):
     config = load_config_raw(config_path)
-    # allow to override seed
-    config.seed = seed
-    # and generate new run id
-    config.id = wandb.util.generate_id()
-    return config
+    if not dataclasses.is_dataclass(config):
+        raise TypeError(f"Expected dataclass config from {config_path}, got {type(config)}")
+
+    return dataclasses.replace(
+        config,
+        seed=seed,
+        id=wandb.util.generate_id(),
+    )
 
 
 def parse_args(args=None):

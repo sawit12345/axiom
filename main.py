@@ -36,6 +36,20 @@ from axiom import infer as ax
 from axiom import visualize as vis
 
 
+def _compute_reward_stats(rewards, window=1000):
+    rewards = np.asarray(rewards, dtype=np.float64)
+    if rewards.size == 0:
+        return rewards, rewards
+
+    cumulative = np.concatenate(([0.0], np.cumsum(rewards)))
+    end_idxs = np.arange(1, rewards.size + 1)
+    start_idxs = np.maximum(0, end_idxs - window)
+
+    reward_sums = cumulative[end_idxs] - cumulative[start_idxs]
+    reward_avgs = reward_sums / (end_idxs - start_idxs)
+    return reward_avgs, reward_sums
+
+
 def main(config):
     key = jr.PRNGKey(config.seed)
     np.random.seed(config.seed)
@@ -51,6 +65,7 @@ def main(config):
     expected_utility = []
     expected_info_gain = []
     num_components = []
+    plan_info = None
 
     # reset
     obs, _ = env.reset()
@@ -68,19 +83,36 @@ def main(config):
     for t in tqdm(range(config.num_steps)):
         # action selection
         key, subkey = jr.split(key)
-        action, carry, plan_info = ax.plan_fn(subkey, carry, config, env.action_space.n)
+        if config.planner is None:
+            action = jr.randint(subkey, shape=(), minval=0, maxval=env.action_space.n)
+            expected_utility.append(0.0)
+            expected_info_gain.append(0.0)
+        else:
+            action, carry, plan_info = ax.plan_fn(subkey, carry, config, env.action_space.n)
 
-        best = jnp.argsort(plan_info["rewards"][:, :, 0].sum(0))[-1]
-        expected_utility.append(
-            plan_info["expected_utility"][:, best, :].mean(-1).sum(0)
-        )
-        expected_info_gain.append(
-            plan_info["expected_info_gain"][:, best, :].mean(-1).sum(0)
-        )
-        num_components.append(carry["rmm_model"].used_mask.sum())
+            best = jnp.argmax(plan_info["rewards"][:, :, 0].sum(0))
+            expected_utility.append(
+                float(
+                    jax.device_get(
+                        plan_info["expected_utility"][:, best, :].mean(-1).sum(0)
+                    )
+                )
+            )
+            expected_info_gain.append(
+                float(
+                    jax.device_get(
+                        plan_info["expected_info_gain"][:, best, :].mean(-1).sum(0)
+                    )
+                )
+            )
+
+        num_components.append(int(jax.device_get(carry["rmm_model"].used_mask.sum())))
+
+        action_int = int(jax.device_get(action))
+        action_arr = jnp.asarray(action_int, dtype=jnp.int32)
 
         # step env
-        obs, reward, done, truncated, info = env.step(action)
+        obs, reward, done, truncated, info = env.step(action_int)
         obs = obs.astype(np.uint8)
         observations.append(obs)
         rewards.append(reward)
@@ -104,14 +136,11 @@ def main(config):
             config,
             obs,
             jnp.array(reward),
-            action,
+            action_arr,
             num_tracked=0,
             update=update,
             remap_color=remap_color,
         )
-
-        # log stuff
-        observations.append(obs)
 
         if done:
             obs, _ = env.reset()
@@ -124,7 +153,7 @@ def main(config):
                 config,
                 obs,
                 jnp.array(reward),
-                jnp.array(0),
+                jnp.array(0, dtype=jnp.int32),
                 num_tracked=0,
                 update=False,
             )
@@ -140,6 +169,12 @@ def main(config):
             )
             carry["rmm_model"] = new_rmm
 
+    rewards_np = np.asarray(rewards, dtype=np.float64)
+    reward_1k_avg, reward_1k_sum = _compute_reward_stats(rewards_np, window=1000)
+    expected_utility_np = np.asarray(expected_utility, dtype=np.float64)
+    expected_info_gain_np = np.asarray(expected_info_gain, dtype=np.float64)
+    num_components_np = np.asarray(num_components, dtype=np.int32)
+
     # Write results to file: a csv file iwth the rewards adn a video of the gameplay
     with open(f"{config.game.lower()}.csv", mode="w", newline="") as file:
         writer = csv.writer(file)
@@ -154,21 +189,21 @@ def main(config):
                 "Num Components",
             ]
         )
-        for i in range(len(rewards)):
+        for i in range(len(rewards_np)):
             writer.writerow(
                 [
                     i,
-                    rewards[i],
-                    jnp.mean(jnp.array(rewards[max(0, i - 1000) : max(i, 1)])),
-                    sum(jnp.array(rewards[max(0, i - 1000) : i])),
-                    expected_utility[i],
-                    expected_info_gain[i],
-                    num_components[i],
+                    rewards_np[i],
+                    reward_1k_avg[i],
+                    reward_1k_sum[i],
+                    expected_utility_np[i],
+                    expected_info_gain_np[i],
+                    num_components_np[i],
                 ]
             )
 
-    with mediapy.set_show_save_dir("."):
-        mediapy.show_videos({f"{config.game.lower()}": observations}, fps=30)
+    observations_np = np.asarray(observations)
+    mediapy.write_video(f"{config.game.lower()}.mp4", observations_np, fps=30)
 
     # Do wandb logging after the job to avoid performance impact
     wandb.init(
@@ -181,31 +216,33 @@ def main(config):
         name=config.name + "-" + config.game,
     )
 
-    for i in range(len(rewards)):
+    for i in range(len(rewards_np)):
         wandb.log(
             {
-                "reward": rewards[i],
-                "reward_1k_avg": jnp.mean(
-                    jnp.array(rewards[max(0, i - 1000) : max(i, 1)])
-                ),
-                "cumulative_reward": sum(jnp.array(rewards[max(0, i - 1000) : i])),
-                "expected_utility": expected_utility[i],
-                "expected_info_gain": expected_info_gain[i],
-                "num_components": num_components[i],
+                "reward": rewards_np[i],
+                "reward_1k_avg": reward_1k_avg[i],
+                "cumulative_reward": reward_1k_sum[i],
+                "expected_utility": expected_utility_np[i],
+                "expected_info_gain": expected_info_gain_np[i],
+                "num_components": num_components_np[i],
             }
         )
 
     # finally log a sample of final gameplay
     logs = {
         "play": wandb.Video(
-            np.asarray(observations)[-1000:].transpose(0, 3, 1, 2),
+            observations_np[-1000:].transpose(0, 3, 1, 2),
             fps=30,
             format="mp4",
         ),
         "rmm": wandb.Image(
             vis.plot_rmm(carry["rmm_model"], carry["imm_model"], colorize="cluster")
         ),
-        "plan": wandb.Image(
+        "identities": wandb.Image(vis.plot_identity_model(carry["imm_model"])),
+    }
+
+    if plan_info is not None and len(observations) >= 2:
+        logs["plan"] = wandb.Image(
             vis.plot_plan(
                 observations[-2],
                 plan_info,
@@ -213,14 +250,13 @@ def main(config):
                 carry["smm_model"].stats,
                 topk=1,
             )
-        ),
-        "identities": wandb.Image(vis.plot_identity_model(carry["imm_model"])),
-    }
+        )
+
     if config.perturb is not None:
+        start = max(0, config.perturb_step - 100)
+        end = min(observations_np.shape[0], config.perturb_step + 100)
         logs["perturb"] = wandb.Video(
-            np.asarray(observations)[
-                config.perturb_step - 100 : config.perturb_step + 100
-            ].transpose(0, 3, 1, 2),
+            observations_np[start:end].transpose(0, 3, 1, 2),
             fps=30,
             format="mp4",
         )

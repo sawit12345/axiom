@@ -179,7 +179,7 @@ def init(key, config, observation, action_dim):
     return initial_carry
 
 
-@partial(jit, static_argnames=["config", "num_tracked", "update", "remap_color"])
+@partial(jit, static_argnames=["config", "num_tracked", "remap_color"])
 def step_fn(
     carry, config, obs, reward, action, num_tracked=0, update=True, remap_color=False
 ):
@@ -195,6 +195,7 @@ def step_fn(
     num_tracked_steps_prev = carry["num_tracked_steps"]
     prev_x = carry["x"]
     key = carry["key"]
+    update = jnp.asarray(update, dtype=bool)
 
     """" Update the SMM model """
     obs = smm_tools.format_single_frame(
@@ -522,10 +523,11 @@ def step_fn(
                 )
                 return imm
 
-            is_visible = (prev_x[dyn_layer_id][k][2] == 0) & fg_mask[dyn_layer_id][k]
-
-            if not update:
-                is_visible = jnp.zeros_like(is_visible, dtype=bool)
+            is_visible = (
+                (prev_x[dyn_layer_id][k][2] == 0)
+                & fg_mask[dyn_layer_id][k]
+                & update
+            )
 
             imm_model_updated = lax.cond(
                 is_visible,  # is_visible if config.rmm.interact_with_static else is_tracked,
@@ -620,16 +622,14 @@ def plan_fn(key, carry, config, action_dim):
 
     x = carry["x"][config.layer_for_dynamics]
     tracked_obj_ids = carry["tracked_obj_ids"][config.layer_for_dynamics]
+    object_identities = imm_tools.infer_identity(
+        imm_model,
+        x[..., None],
+        config.imm.color_only_identity,
+    )
 
     def rollout_fn(k, x, actions):
-
         def rollout_action_seq(actions, key):
-            object_identities = imm_tools.infer_identity(
-                imm_model,
-                x[..., None],
-                config.imm.color_only_identity,
-            )
-
             return rmm_tools.rollout(
                 rmm_model,
                 imm_model,
@@ -676,19 +676,27 @@ def plan_fn(key, carry, config, action_dim):
 
 
 def reduce_fn_rmm(key, rmm_model, cxm=None, dxm=None, n_samples=2000, n_pairs=2000):
+    buffer_size = max(int(n_samples), 1)
+
     key, subkey = jr.split(key)
-    cxm_new, dxm_new = rmm_model.model.sample(subkey, n_samples)
+    cxm_new, dxm_new = rmm_model.model.sample(subkey, buffer_size)
     if cxm is None:
         cxm, dxm = cxm_new, dxm_new
     else:
-        # Basically also keep optimizing for the old data points that were sampled
-        cxm = jnp.concatenate([cxm, cxm_new], axis=0)
+        # Keep a bounded replay buffer to avoid growing BMR cost over time.
+        cxm = jnp.concatenate([cxm, cxm_new], axis=0)[-buffer_size:]
         dxm = jtu.tree_map(
-            lambda d1, d2: jnp.concatenate([d1, d2], axis=0), dxm, dxm_new
+            lambda d1, d2: jnp.concatenate([d1, d2], axis=0)[-buffer_size:],
+            dxm,
+            dxm_new,
         )
 
     key, subkey = jr.split(key)
     rmm_model, _, _, merged_pairs = rmm_tools.run_bmr(
-        subkey, rmm_model, n_pairs, cxm=cxm, dxm=dxm
+        subkey,
+        rmm_model,
+        n_samples=n_pairs,
+        cxm=cxm,
+        dxm=dxm,
     )
     return rmm_model, merged_pairs, cxm, dxm

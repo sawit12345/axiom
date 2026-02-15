@@ -793,13 +793,19 @@ def _find_pairs(key, rmm, n_samples=None):
     cxm, dxm = rmm.model.get_means_as_data()
 
     indices = jnp.arange(rmm.used_mask.shape[0])[rmm.used_mask > 0]
+    if len(indices) < 2:
+        return jnp.zeros((0, 2), dtype=jnp.int32)
 
     if n_samples is not None:
+        sample_size = min(n_samples * 2, len(indices))
+        if sample_size < 2:
+            return jnp.zeros((0, 2), dtype=jnp.int32)
+
         indices = indices[
             jr.choice(
                 key,
                 jnp.arange(len(indices)),
-                shape=(min(n_samples * 2, len(indices) - 1),),
+                shape=(sample_size,),
                 replace=False,
             )
         ]
@@ -833,7 +839,8 @@ def _find_pairs(key, rmm, n_samples=None):
     mask = jnp.zeros(pairs.shape[0]).astype(bool)
     mask, _ = jax.lax.scan(filter_fn, mask, jnp.arange(pairs.shape[0]))
 
-    return pairs[mask][:n_samples]
+    pairs = pairs[mask]
+    return pairs[:n_samples] if n_samples is not None else pairs
 
 
 @jax.jit
