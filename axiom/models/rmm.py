@@ -87,6 +87,10 @@ class RMM(NamedTuple):
     max_switches: int = eqx.static_field()
 
 
+PREDICT_FAST_CAP_SMALL = 512
+PREDICT_FAST_CAP_MEDIUM = 2048
+
+
 def predict(
     rmm: RMM,
     c_sample: Array,
@@ -105,12 +109,61 @@ def predict(
     w_disc = jnp.array([1.0] * len(rmm.model.discrete_likelihoods))
     w_disc = w_disc.at[-2:].set(0.0)
 
-    # Do an e-step to infer the mixture cluster
-    qz, c_ell, d_ell = rmm.model._e_step(c_sample, d_sample, w_disc)
+    total_components = rmm.used_mask.shape[0]
+    active_prefix_len = jnp.where(
+        rmm.used_mask > 0,
+        jnp.arange(total_components, dtype=jnp.int32) + 1,
+        0,
+    ).max()
 
-    elogp = c_ell + d_ell
-    elogp = elogp * rmm.used_mask[None] + (1 - rmm.used_mask[None]) * (-1e10)
-    qz = softmax(elogp, rmm.model.mix_dims)
+    def _e_step_with_prefix(prefix_size: int):
+        def _slice_if_component_axis(x):
+            if hasattr(x, "shape") and len(x.shape) > 0 and x.shape[0] == total_components:
+                return x[:prefix_size]
+            return x
+
+        model_prefix = jtu.tree_map(_slice_if_component_axis, rmm.model)
+        qz_prefix, c_ell_prefix, d_ell_prefix = model_prefix._e_step(
+            c_sample, d_sample, w_disc
+        )
+
+        elogp_prefix = c_ell_prefix + d_ell_prefix
+        used_prefix = rmm.used_mask[:prefix_size]
+        elogp_prefix = elogp_prefix * used_prefix[None] + (1 - used_prefix[None]) * (
+            -1e10
+        )
+
+        elogp = jnp.full(
+            (elogp_prefix.shape[0], total_components),
+            -1e10,
+            dtype=elogp_prefix.dtype,
+        ).at[:, :prefix_size].set(elogp_prefix)
+        qz = softmax(elogp, rmm.model.mix_dims)
+        return qz, elogp
+
+    def _e_step_full(_):
+        qz_full, c_ell_full, d_ell_full = rmm.model._e_step(c_sample, d_sample, w_disc)
+        elogp_full = c_ell_full + d_ell_full
+        elogp_full = elogp_full * rmm.used_mask[None] + (1 - rmm.used_mask[None]) * (
+            -1e10
+        )
+        qz_full = softmax(elogp_full, rmm.model.mix_dims)
+        return qz_full, elogp_full
+
+    small_cap = min(PREDICT_FAST_CAP_SMALL, total_components)
+    medium_cap = min(PREDICT_FAST_CAP_MEDIUM, total_components)
+
+    qz, elogp = jax.lax.cond(
+        active_prefix_len <= small_cap,
+        lambda _: _e_step_with_prefix(small_cap),
+        lambda _: jax.lax.cond(
+            active_prefix_len <= medium_cap,
+            lambda __: _e_step_with_prefix(medium_cap),
+            _e_step_full,
+            None,
+        ),
+        None,
+    )
 
     # Get the distribution over the TMM switch of the inferred cluster
     p_tmm = rmm.model.discrete_likelihoods[-1].mean()[..., 0]

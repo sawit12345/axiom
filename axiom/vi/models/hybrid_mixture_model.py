@@ -95,12 +95,20 @@ class HybridMixture(eqx.Module):
 
         disc_ell = jnp.zeros_like(cont_ell)
         for i, dlh in enumerate(self.discrete_likelihoods):
-            d_data_i = self.expand_to_categorical_dims(
-                d_data[i], dlh.batch_dim, dlh.event_dim
-            )
+            w_i = w_disc[i]
 
-            # More weight on action
-            disc_ell += w_disc[i] * dlh.expected_log_likelihood(d_data_i)
+            def _compute_disc_ell(_):
+                d_data_i = self.expand_to_categorical_dims(
+                    d_data[i], dlh.batch_dim, dlh.event_dim
+                )
+                return w_i * dlh.expected_log_likelihood(d_data_i)
+
+            disc_ell += jax.lax.cond(
+                w_i == 0,
+                lambda _: jnp.zeros_like(cont_ell),
+                _compute_disc_ell,
+                operand=None,
+            )
 
         posterior = softmax(cont_ell + disc_ell, self.mix_dims)
 
