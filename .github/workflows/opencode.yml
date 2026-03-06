@@ -67,9 +67,6 @@ jobs:
           done
 
           echo "All repos cloned. Total: $(ls ~/repos | wc -l)"
-        with:
-          token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          fetch-depth: 0
 
       # ============================================================
       # CACHE: Restore provider packages (~/.cache/opencode)
