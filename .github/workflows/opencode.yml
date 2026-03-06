@@ -100,19 +100,13 @@ jobs:
           echo "Contents of /tmp/opencode-restore:"
           ls -la /tmp/opencode-restore/ 2>/dev/null || echo "Directory does not exist"
 
-          if [ -d "/tmp/opencode-restore" ]; then
-            mkdir -p ~/.config/opencode ~/.local/share/opencode
+          mkdir -p ~/.config/opencode ~/.local/share/opencode
 
+          if [ -d "/tmp/opencode-restore" ]; then
             # Restore config (theme, reasoning display, provider config)
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring config files..."
               cp -rv /tmp/opencode-restore/config/* ~/.config/opencode/ 2>/dev/null || true
-            fi
-
-            # Restore auth tokens
-            if [ -f "/tmp/opencode-restore/auth.json" ]; then
-              echo "Restoring auth.json..."
-              cp -v /tmp/opencode-restore/auth.json ~/.local/share/opencode/auth.json 2>/dev/null || true
             fi
 
             # Restore SQLite database (main + WAL sidecar files)
@@ -131,6 +125,14 @@ jobs:
           else
             echo "No previous session found. Fresh start."
           fi
+
+          # Always write auth.json with all three noob provider keys
+          # apiKey in options has a known bug and is never forwarded - auth.json is the fix
+          printf '%s\n' \
+            '{"noob":{"type":"api","key":"sk-gpt"},' \
+            '"noob-chat":{"type":"api","key":"sk-gpt"},' \
+            '"noob-responses":{"type":"api","key":"sk-gpt"}}' > ~/.local/share/opencode/auth.json
+          echo "Auth credentials written."
 
       # ============================================================
       # SETUP: Node and tools
@@ -164,7 +166,20 @@ jobs:
       # ============================================================
       - name: Configure OpenCode
         run: |
-          mkdir -p ~/.config/opencode
+          mkdir -p ~/.config/opencode ~/.local/share/opencode
+
+          # Write auth.json with API key for noob provider
+          # OpenCode reads credentials from here, not from opencode.json options
+          if [ ! -f "$HOME/.local/share/opencode/auth.json" ]; then
+            echo "Writing auth.json..."
+            printf '%s\n' \
+              '{' \
+              '  "noob": "sk-gpt"' \
+              '}' > ~/.local/share/opencode/auth.json
+            echo "Auth written."
+          else
+            echo "Restored auth.json found. Skipping."
+          fi
 
           if [ ! -f "$HOME/.config/opencode/opencode.json" ]; then
             echo "No restored config found. Writing default config..."
@@ -192,8 +207,55 @@ jobs:
               '        },' \
               '        "gpt-5.4": {' \
               '          "name": "GPT-5.4",' \
-              '          "limit": { "context": 1048576, "output": 128000 },' \
-              '          "options": { "reasoningEffort": "high" }' \
+              '          "limit": { "context": 1048576, "output": 128000 }' \
+              '        }' \
+              '      }' \
+              '    },' \
+              '    "noob-chat": {' \
+              '      "npm": "@ai-sdk/openai-compatible",' \
+              '      "name": "Noob Router (Chat)",' \
+              '      "options": {' \
+              '        "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/chat/completions",' \
+              '        "apiKey": "sk-gpt",' \
+              '        "reasoningEffort": "xhigh",' \
+              '        "reasoningSummary": "detailed"' \
+              '      },' \
+              '      "models": {' \
+              '        "gpt-5.3-codex": {' \
+              '          "name": "GPT-5.3 Codex (Chat)",' \
+              '          "limit": { "context": 272000, "output": 128000 }' \
+              '        },' \
+              '        "gpt-5.3-codex-spark": {' \
+              '          "name": "GPT-5.3 Codex Spark (Chat)",' \
+              '          "limit": { "context": 272000, "output": 128000 }' \
+              '        },' \
+              '        "gpt-5.4": {' \
+              '          "name": "GPT-5.4 (Chat)",' \
+              '          "limit": { "context": 1048576, "output": 128000 }' \
+              '        }' \
+              '      }' \
+              '    },' \
+              '    "noob-responses": {' \
+              '      "npm": "@ai-sdk/openai-compatible",' \
+              '      "name": "Noob Router (Responses)",' \
+              '      "options": {' \
+              '        "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/responses",' \
+              '        "apiKey": "sk-gpt",' \
+              '        "reasoningEffort": "xhigh",' \
+              '        "reasoningSummary": "detailed"' \
+              '      },' \
+              '      "models": {' \
+              '        "gpt-5.3-codex": {' \
+              '          "name": "GPT-5.3 Codex (Responses)",' \
+              '          "limit": { "context": 272000, "output": 128000 }' \
+              '        },' \
+              '        "gpt-5.3-codex-spark": {' \
+              '          "name": "GPT-5.3 Codex Spark (Responses)",' \
+              '          "limit": { "context": 272000, "output": 128000 }' \
+              '        },' \
+              '        "gpt-5.4": {' \
+              '          "name": "GPT-5.4 (Responses)",' \
+              '          "limit": { "context": 1048576, "output": 128000 }' \
               '        }' \
               '      }' \
               '    }' \
@@ -211,7 +273,14 @@ jobs:
         env:
           OPENAI_API_KEY: sk-gpt
           OPENAI_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
+          NOOB_API_KEY: sk-gpt
+          NOOB_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
         run: |
+          # Verify proxy is reachable before starting
+          echo "Testing proxy connection..."
+          curl -s -o /dev/null -w "Proxy HTTP status: %{http_code}\n" \
+            -H "Authorization: Bearer sk-gpt" \
+            https://noobrouterproduction.azurewebsites.net/v1/models || echo "Warning: proxy check failed"
           echo "Starting OpenCode TTY..."
           nohup stdbuf -oL ttyd -p 7681 opencode > opencode_tty.log 2>&1 &
 
