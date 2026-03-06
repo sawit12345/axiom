@@ -334,7 +334,7 @@ jobs:
               fi
             fi
 
-            tail -n 1 openchamber.log
+            tail -n 1 openchamber.log 2>/dev/null || true
 
             # Check all repos for remote updates and pull if changed
             for repo_dir in ~/repos/*/; do
@@ -364,8 +364,10 @@ jobs:
           mkdir -p /tmp/opencode-save/config
 
           # Save ~/.config/opencode (theme, reasoning prefs, provider config)
+          # Exclude node_modules, bun.lock - these are provider packages handled by cache
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A $HOME/.config/opencode 2>/dev/null)" ]; then
-            cp -rv $HOME/.config/opencode/* /tmp/opencode-save/config/ 2>/dev/null || true
+            rsync -av --exclude='node_modules' --exclude='bun.lock' --exclude='*.lock' \
+              $HOME/.config/opencode/ /tmp/opencode-save/config/ 2>/dev/null || true
             echo "Config saved: $(ls /tmp/opencode-save/config/ | wc -l) files"
           else
             echo "No config data to save"
