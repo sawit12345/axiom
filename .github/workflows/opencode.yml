@@ -209,6 +209,9 @@ jobs:
       # STARTUP: Launch services
       # ============================================================
       - name: Start Services
+        env:
+          OPENAI_API_KEY: sk-gpt
+          OPENAI_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
         run: |
           echo "Starting OpenCode TTY..."
           nohup stdbuf -oL ttyd -p 7681 opencode > opencode_tty.log 2>&1 &
