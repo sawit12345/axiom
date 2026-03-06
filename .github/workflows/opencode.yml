@@ -126,12 +126,10 @@ jobs:
             echo "No previous session found. Fresh start."
           fi
 
-          # Always write auth.json with all three noob provider keys
-          # apiKey in options has a known bug and is never forwarded - auth.json is the fix
-          printf '%s\n' \
-            '{"noob":{"type":"api","key":"sk-gpt"},' \
-            '"noob-chat":{"type":"api","key":"sk-gpt"},' \
-            '"noob-responses":{"type":"api","key":"sk-gpt"}}' > ~/.local/share/opencode/auth.json
+          # Write auth.json with the built-in openai provider key
+          # OPENAI_BASE_URL env var routes requests to the proxy
+          # OPENAI_API_KEY env var is read natively - bypasses broken options forwarding bug
+          echo '{"openai":{"type":"api","key":"sk-gpt"}}' > ~/.local/share/opencode/auth.json
           echo "Auth credentials written."
 
       # ============================================================
@@ -187,12 +185,8 @@ jobs:
               '{' \
               '  "$schema": "https://opencode.ai/config.json",' \
               '  "provider": {' \
-              '    "noob": {' \
-              '      "npm": "@ai-sdk/openai-compatible",' \
-              '      "name": "Noob Router",' \
+              '    "openai": {' \
               '      "options": {' \
-              '        "baseURL": "https://noobrouterproduction.azurewebsites.net/v1",' \
-              '        "apiKey": "sk-gpt",' \
               '        "reasoningEffort": "xhigh",' \
               '        "reasoningSummary": "detailed"' \
               '      },' \
@@ -207,54 +201,6 @@ jobs:
               '        },' \
               '        "gpt-5.4": {' \
               '          "name": "GPT-5.4",' \
-              '          "limit": { "context": 1048576, "output": 128000 }' \
-              '        }' \
-              '      }' \
-              '    },' \
-              '    "noob-chat": {' \
-              '      "npm": "@ai-sdk/openai-compatible",' \
-              '      "name": "Noob Router (Chat)",' \
-              '      "options": {' \
-              '        "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/chat/completions",' \
-              '        "apiKey": "sk-gpt",' \
-              '        "reasoningEffort": "xhigh",' \
-              '        "reasoningSummary": "detailed"' \
-              '      },' \
-              '      "models": {' \
-              '        "gpt-5.3-codex": {' \
-              '          "name": "GPT-5.3 Codex (Chat)",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.3-codex-spark": {' \
-              '          "name": "GPT-5.3 Codex Spark (Chat)",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.4": {' \
-              '          "name": "GPT-5.4 (Chat)",' \
-              '          "limit": { "context": 1048576, "output": 128000 }' \
-              '        }' \
-              '      }' \
-              '    },' \
-              '    "noob-responses": {' \
-              '      "npm": "@ai-sdk/openai-compatible",' \
-              '      "name": "Noob Router (Responses)",' \
-              '      "options": {' \
-              '        "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/responses",' \
-              '        "apiKey": "sk-gpt",' \
-              '        "reasoningEffort": "xhigh",' \
-              '        "reasoningSummary": "detailed"' \
-              '      },' \
-              '      "models": {' \
-              '        "gpt-5.3-codex": {' \
-              '          "name": "GPT-5.3 Codex (Responses)",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.3-codex-spark": {' \
-              '          "name": "GPT-5.3 Codex Spark (Responses)",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.4": {' \
-              '          "name": "GPT-5.4 (Responses)",' \
               '          "limit": { "context": 1048576, "output": 128000 }' \
               '        }' \
               '      }' \
