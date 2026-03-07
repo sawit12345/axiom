@@ -163,35 +163,20 @@ jobs:
             "plugin": ["opencode-antigravity-auth@beta"],
             "provider": {
               "noobrouter": {
-                "apiKey": "sk-gpt",
-                "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/responses",
-                "fallbackURLs": [
-                  "https://noobrouterproduction.azurewebsites.net/chat/completions",
-                  "https://noobrouterproduction.azurewebsites.net/v1"
-                ],
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "NoobroRouter",
+                "options": {
+                  "baseURL": "https://noobrouterproduction.azurewebsites.net/v1",
+                  "apiKey": "sk-gpt"
+                },
                 "models": {
                   "gpt-5.4": {
-                    "name": "GPT-5.4 (NoobroRouter)",
-                    "limit": { "context": 1000000, "output": 128000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "none": { "reasoning": { "effort": "none" } },
-                      "low": { "reasoning": { "effort": "low" } },
-                      "medium": { "reasoning": { "effort": "medium" } },
-                      "high": { "reasoning": { "effort": "high" } },
-                      "xhigh": { "reasoning": { "effort": "xhigh" } }
-                    }
+                    "name": "GPT-5.4",
+                    "limit": { "context": 1000000, "output": 128000 }
                   },
                   "gpt-5.3-codex": {
-                    "name": "GPT-5.3-Codex (NoobroRouter)",
-                    "limit": { "context": 400000, "output": 128000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "reasoning": { "effort": "low" } },
-                      "medium": { "reasoning": { "effort": "medium" } },
-                      "high": { "reasoning": { "effort": "high" } },
-                      "xhigh": { "reasoning": { "effort": "xhigh" } }
-                    }
+                    "name": "GPT-5.3-Codex",
+                    "limit": { "context": 400000, "output": 128000 }
                   }
                 }
               },
