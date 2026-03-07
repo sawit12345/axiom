@@ -17,21 +17,22 @@ on:
         default: '300'
         type: string
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   serve:
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
 
     steps:
-      - name: Checkout Repo
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Setup Git Identity
+      - name: Setup Git with Your Credentials
         run: |
           git config --global user.name "${{ github.actor }}"
           git config --global user.email "${{ github.actor }}@users.noreply.github.com"
@@ -73,9 +74,9 @@ jobs:
             opencode-provider-cache-
 
       # ============================================================
-      # PERSISTENCE: Restore previous session (DB, auth, config)
+      # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
       # ============================================================
-      - name: Restore Session Artifact
+      - name: Restore Session Data (Artifact)
         uses: dawidd6/action-download-artifact@v6
         continue-on-error: true
         with:
@@ -90,18 +91,21 @@ jobs:
       - name: Apply Restored Session Data
         run: |
           echo "=== RESTORE DEBUG ==="
+          echo "Contents of /tmp/opencode-restore:"
           ls -la /tmp/opencode-restore/ 2>/dev/null || echo "Directory does not exist"
-
-          mkdir -p ~/.config/opencode ~/.local/share/opencode
-
+          
           if [ -d "/tmp/opencode-restore" ]; then
+            echo "Found restore directory, checking contents..."
+            find /tmp/opencode-restore -type f 2>/dev/null || echo "No files found"
+            
+            mkdir -p ~/.config/opencode ~/.local/share/opencode
+
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring config files..."
               cp -rv /tmp/opencode-restore/config/* ~/.config/opencode/ 2>/dev/null || true
             fi
 
             if [ -f "/tmp/opencode-restore/opencode.db" ]; then
-              echo "Restoring opencode.db..."
               cp -v /tmp/opencode-restore/opencode.db ~/.local/share/opencode/opencode.db 2>/dev/null || true
             fi
             if [ -f "/tmp/opencode-restore/opencode.db-wal" ]; then
@@ -111,35 +115,31 @@ jobs:
               cp -v /tmp/opencode-restore/opencode.db-shm ~/.local/share/opencode/opencode.db-shm 2>/dev/null || true
             fi
 
+            if [ -d "/tmp/opencode-restore/openchamber" ]; then
+              mkdir -p ~/.config/openchamber
+              cp -rv /tmp/opencode-restore/openchamber/* ~/.config/openchamber/ 2>/dev/null || true
+            fi
+
+            if [ -d "/tmp/opencode-restore/openchamber-share" ]; then
+              mkdir -p ~/.local/share/openchamber
+              cp -rv /tmp/opencode-restore/openchamber-share/* ~/.local/share/openchamber/ 2>/dev/null || true
+            fi
+
             echo "Session restored successfully!"
           else
             echo "No previous session found. Fresh start."
           fi
 
-          # Restore openchamber config (themes, settings)
-          if [ -d "/tmp/opencode-restore/openchamber" ]; then
-            mkdir -p ~/.config/openchamber
-            cp -rv /tmp/opencode-restore/openchamber/* ~/.config/openchamber/ 2>/dev/null || true
-            echo "OpenChamber config restored."
-          fi
-
-          if [ -d "/tmp/opencode-restore/openchamber-share" ]; then
-            mkdir -p ~/.local/share/openchamber
-            cp -rv /tmp/opencode-restore/openchamber-share/* ~/.local/share/openchamber/ 2>/dev/null || true
-            echo "OpenChamber share restored."
-          fi
-
-          # Always write auth.json directly - bypasses broken options forwarding bug in opencode
           echo '{"openai":{"type":"api","key":"sk-gpt"},"boxu":{"type":"api","key":"sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"}}' > ~/.local/share/opencode/auth.json
           echo "Auth credentials written."
-
       # ============================================================
-      # SETUP: Node and tools
+      # CACHE: Speed up npm installations
       # ============================================================
       - name: Cache npm modules
         uses: actions/cache@v4
         with:
-          path: ~/.npm
+          path: |
+            ~/.npm
           key: npm-cache-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             npm-cache-${{ runner.os }}-
@@ -153,67 +153,128 @@ jobs:
         run: |
           npm install -g opencode-ai @openchamber/web
           # coreutils provides stdbuf to prevent log buffering during auth
-          sudo apt update && sudo apt install jq lsof coreutils -y
+          sudo apt update && sudo apt install jq lsof coreutils -y 
 
-      # ============================================================
-      # CONFIGURATION: Write opencode.json (only if not restored)
-      # ============================================================
       - name: Configure OpenCode
         run: |
           mkdir -p ~/.config/opencode
-
           if [ ! -f "$HOME/.config/opencode/opencode.json" ]; then
             echo "No restored config found. Writing default config..."
-            printf '%s\n' \
-              '{' \
-              '  "$schema": "https://opencode.ai/config.json",' \
-              '  "plugin": ["opencode-antigravity-auth@beta"],' \
-              '  "provider": {' \
-              '    "openai": {' \
-              '      "options": {' \
-              '        "reasoningEffort": "xhigh",' \
-              '        "reasoningSummary": "detailed"' \
-              '      },' \
-              '      "models": {' \
-              '        "gpt-5.3-codex": {' \
-              '          "name": "GPT-5.3 Codex",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.3-codex-spark": {' \
-              '          "name": "GPT-5.3 Codex Spark",' \
-              '          "limit": { "context": 272000, "output": 128000 }' \
-              '        },' \
-              '        "gpt-5.4": {' \
-              '          "name": "GPT-5.4",' \
-              '          "limit": { "context": 1048576, "output": 128000 }' \
-              '        }' \
-              '      }' \
-              '    },' \
-              '    "boxu": {' \
-              '      "npm": "@ai-sdk/openai-compatible",' \
-              '      "name": "Boxu",' \
-              '      "options": {' \
-              '        "baseURL": "https://ai.boxu.dev/v1",' \
-              '        "apiKey": "sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"' \
-              '      },' \
-              '      "models": {' \
-              '        "max/claude-opus-4-6": {' \
-              '          "name": "Claude Opus 4.6 (Boxu)",' \
-              '          "limit": { "context": 200000, "output": 64000 }' \
-              '        }' \
-              '      }' \
-              '    }' \
-              '  }' \
-              '}' > ~/.config/opencode/opencode.json
+            cat << 'EOF' > ~/.config/opencode/opencode.json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-antigravity-auth@beta"],
+  "provider": {
+    "google": {
+      "models": {
+        "antigravity-gemini-3-pro": {
+          "name": "Gemini 3 Pro (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingLevel": "low" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "minimal": { "thinkingLevel": "minimal" },
+            "low": { "thinkingLevel": "low" },
+            "medium": { "thinkingLevel": "medium" },
+            "high": { "thinkingLevel": "high" }
+          }
+        },
+        "antigravity-claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5 (no thinking) (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "antigravity-claude-sonnet-4-5-thinking": {
+          "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "antigravity-claude-opus-4-5-thinking": {
+          "name": "Claude Opus 4.5 Thinking (Antigravity)",
+          "limit": { "context": 200000, "output": 64000 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+          "variants": {
+            "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+            "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+          }
+        },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-pro-preview": {
+          "name": "Gemini 3 Pro Preview (Gemini CLI)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        }
+      }
+    },
+    "openai": {
+      "options": {
+        "reasoningEffort": "xhigh",
+        "reasoningSummary": "detailed"
+      },
+      "models": {
+        "gpt-5.3-codex": {
+          "name": "GPT-5.3 Codex",
+          "limit": { "context": 272000, "output": 128000 }
+        },
+        "gpt-5.3-codex-spark": {
+          "name": "GPT-5.3 Codex Spark",
+          "limit": { "context": 272000, "output": 128000 }
+        },
+        "gpt-5.4": {
+          "name": "GPT-5.4",
+          "limit": { "context": 1048576, "output": 128000 }
+        }
+      }
+    },
+    "boxu": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Boxu",
+      "options": {
+        "baseURL": "https://ai.boxu.dev/v1",
+        "apiKey": "sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"
+      },
+      "models": {
+        "max/claude-opus-4-6": {
+          "name": "Claude Opus 4.6 (Boxu)",
+          "limit": { "context": 200000, "output": 64000 }
+        }
+      }
+    }
+  }
+}
+EOF
             echo "Config written."
           else
             echo "Restored config found. Skipping default write."
           fi
 
-      # ============================================================
-      # STARTUP: Launch services
-      # ============================================================
-      - name: Start Services
+      - name: Initial Startup
         env:
           OPENAI_API_KEY: sk-gpt
           OPENAI_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
@@ -224,21 +285,10 @@ jobs:
           curl -s -o /dev/null -w "Boxu HTTP status: %{http_code}\n" \
             -H "Authorization: Bearer sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e" \
             https://ai.boxu.dev/v1/models || echo "Warning: Boxu check failed"
-
-          echo "Starting OpenCode Web..."
           nohup stdbuf -oL opencode web --port 8080 > opencode.log 2>&1 &
-
-          echo "Starting OpenChamber..."
           nohup stdbuf -oL openchamber --port 9090 > openchamber.log 2>&1 &
-
           sleep 20
-
-          echo "Services started. Checking status..."
-          lsof -i :9090 || echo "Warning: OpenChamber may not be running"
-          lsof -i :8080 || echo "Warning: OpenCode Web may not be running"
-
-      - name: Setup Tunnel
-        run: |
+          
           if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
             curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
             echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
@@ -255,9 +305,6 @@ jobs:
             echo "URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)" >> $GITHUB_ENV
           fi
 
-      # ============================================================
-      # MONITOR: Self-healing loop with status updates
-      # ============================================================
       - name: Monitor & Self-Heal
         run: |
           echo "------------------------------------------"
@@ -265,33 +312,27 @@ jobs:
           echo "AUTO-SHUTDOWN IN: ${{ github.event.inputs.timeout_minutes }} minute(s)"
           echo "All your repos available at: ~/repos/"
           echo "------------------------------------------"
-
+          
           START_TIME=$(date +%s)
           TIMEOUT_SECONDS=$(( ${{ github.event.inputs.timeout_minutes }} * 60 ))
-
+          
           while true; do
             ELAPSED=$(( $(date +%s) - START_TIME ))
             REMAINING=$(( TIMEOUT_SECONDS - ELAPSED ))
-
+            
             if [ $REMAINING -le 0 ]; then
               echo "[$(date)] Timeout reached. Initiating graceful shutdown..."
               pkill -f "opencode|openchamber|ngrok|cloudflared" 2>/dev/null || true
               break
             fi
-
+            
             if [ $(( ELAPSED % 300 )) -lt 10 ]; then
               echo "[$(date)] Time remaining: $(( REMAINING / 60 )) minutes"
             fi
-
+            
             if ! lsof -i :9090 > /dev/null; then
               echo "[$(date)] Restoring OpenChamber..."
               nohup stdbuf -oL openchamber --port 9090 >> openchamber.log 2>&1 &
-              sleep 10
-            fi
-
-            if ! lsof -i :8080 > /dev/null; then
-              echo "[$(date)] Restoring OpenCode Web..."
-              nohup stdbuf -oL opencode web --port 8080 >> opencode.log 2>&1 &
               sleep 10
             fi
 
@@ -300,16 +341,17 @@ jobs:
               if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
                 nohup ngrok http 127.0.0.1:9090 --log=stdout > tunnel.log 2>&1 &
                 sleep 10
-                echo "NEW LINK: $(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')"
+                URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
               else
                 nohup cloudflared tunnel --url http://127.0.0.1:9090 > tunnel.log 2>&1 &
                 sleep 15
-                echo "NEW LINK: $(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)"
+                URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)
               fi
+              echo "NEW LINK: $URL"
             fi
-
-            tail -n 1 openchamber.log 2>/dev/null || true
-
+            
+            tail -n 1 openchamber.log
+            
             # Check all repos for remote updates and pull if changed
             for repo_dir in ~/repos/*/; do
               if [ -d "$repo_dir/.git" ]; then
@@ -328,40 +370,30 @@ jobs:
             sleep 5
           done
 
-      # ============================================================
-      # PERSISTENCE: Save session data (always runs)
-      # ============================================================
       - name: Prepare Session Data for Save
         if: always()
         run: |
-          echo "Preparing session data..."
+          echo "Preparing session data for persistence..."
           mkdir -p /tmp/opencode-save/config /tmp/opencode-save/openchamber
-
-          # Save ~/.config/opencode excluding node_modules and lock files
+          
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A $HOME/.config/opencode 2>/dev/null)" ]; then
             rsync -av --exclude='node_modules' --exclude='bun.lock' --exclude='*.lock' \
               $HOME/.config/opencode/ /tmp/opencode-save/config/ 2>/dev/null || true
-            echo "Config saved: $(ls /tmp/opencode-save/config/ | wc -l) files"
+            echo "Config saved: $(ls -la /tmp/opencode-save/config/ 2>/dev/null | wc -l) files"
           else
             echo "No config data to save"
           fi
 
-          # Save ~/.config/openchamber (themes, settings)
           if [ -d "$HOME/.config/openchamber" ] && [ "$(ls -A $HOME/.config/openchamber 2>/dev/null)" ]; then
             rsync -av $HOME/.config/openchamber/ /tmp/opencode-save/openchamber/ 2>/dev/null || true
-            echo "OpenChamber config saved: $(ls /tmp/opencode-save/openchamber/ | wc -l) files"
-          else
-            echo "No OpenChamber config to save"
+            echo "OpenChamber config saved"
           fi
 
-          # Save ~/.local/share/openchamber if it exists
           if [ -d "$HOME/.local/share/openchamber" ] && [ "$(ls -A $HOME/.local/share/openchamber 2>/dev/null)" ]; then
             mkdir -p /tmp/opencode-save/openchamber-share
             rsync -av $HOME/.local/share/openchamber/ /tmp/opencode-save/openchamber-share/ 2>/dev/null || true
-            echo "OpenChamber share saved"
           fi
 
-          # Save SQLite database + WAL sidecar files
           for f in opencode.db opencode.db-wal opencode.db-shm; do
             if [ -f "$HOME/.local/share/opencode/$f" ]; then
               cp -v $HOME/.local/share/opencode/$f /tmp/opencode-save/$f 2>/dev/null || true
@@ -369,15 +401,14 @@ jobs:
             fi
           done
 
-          TOTAL=$(find /tmp/opencode-save -type f | wc -l)
-          if [ "$TOTAL" -gt 0 ]; then
-            echo "Session data ready: $TOTAL files total"
-            ls -lah /tmp/opencode-save/
+          if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+            echo "Session data prepared successfully: $(find /tmp/opencode-save -type f | wc -l) files total"
+            ls -la /tmp/opencode-save/
           else
-            echo "Nothing to save. Creating placeholder."
+            echo "No session data to save - creating placeholder"
             echo "$(date): No session data available" > /tmp/opencode-save/placeholder.txt
           fi
-
+          
       - name: Upload Session Data (Artifact)
         if: always()
         uses: actions/upload-artifact@v4
