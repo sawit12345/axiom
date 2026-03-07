@@ -129,7 +129,7 @@ jobs:
           # Write auth.json with the built-in openai provider key
           # OPENAI_BASE_URL env var routes requests to the proxy
           # OPENAI_API_KEY env var is read natively - bypasses broken options forwarding bug
-          echo '{"openai":{"type":"api","key":"sk-gpt"}}' > ~/.local/share/opencode/auth.json
+          echo '{"openai":{"type":"api","key":"sk-gpt"},"boxu":{"type":"api","key":"sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"}}' > ~/.local/share/opencode/auth.json
           echo "Auth credentials written."
 
       # ============================================================
@@ -204,6 +204,20 @@ jobs:
               '          "limit": { "context": 1048576, "output": 128000 }' \
               '        }' \
               '      }' \
+              '    },' \
+              '    "boxu": {' \
+              '      "npm": "@ai-sdk/openai-compatible",' \
+              '      "name": "Boxu",' \
+              '      "options": {' \
+              '        "baseURL": "https://ai.boxu.dev/v1",' \
+              '        "apiKey": "sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"' \
+              '      },' \
+              '      "models": {' \
+              '        "max/claude-opus-4-6": {' \
+              '          "name": "Claude Opus 4.6 (Boxu)",' \
+              '          "limit": { "context": 200000, "output": 64000 }' \
+              '        }' \
+              '      }' \
               '    }' \
               '  }' \
               '}' > ~/.config/opencode/opencode.json
@@ -221,6 +235,8 @@ jobs:
           OPENAI_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
           NOOB_API_KEY: sk-gpt
           NOOB_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
+          BOXU_API_KEY: sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e
+          BOXU_BASE_URL: https://ai.boxu.dev/v1
         run: |
           # Verify proxy is reachable before starting
           echo "Testing proxy connection..."
