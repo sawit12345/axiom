@@ -28,9 +28,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Setup Git with Your Credentials
         run: |
@@ -43,35 +40,17 @@ jobs:
         run: |
           mkdir -p ~/repos
           cd ~/repos
-
-          page=1
-          while true; do
-            batch=$(curl -s -H "Authorization: token $GH_TOKEN" \
-              "https://api.github.com/user/repos?per_page=100&page=$page&affiliation=owner")
-            count=$(echo "$batch" | jq '. | length')
-            if [ "$count" -eq 0 ]; then break; fi
-
-            echo "$batch" | jq -r '.[].clone_url' | while read -r repo; do
-              repo_name=$(basename "$repo" .git)
-              echo "Cloning $repo_name..."
-              git clone https://$GH_TOKEN@${repo#https://} || true
-            done
-
-            page=$(( page + 1 ))
+          
+          # Get list of all your repos
+          repos=$(curl -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/user/repos?per_page=100&affiliation=owner" \
+            | jq -r '.[].clone_url')
+          
+          # Clone each repo
+          for repo in $repos; do
+            echo "Cloning $repo..."
+            git clone https://$GH_TOKEN@${repo#https://} || true
           done
-
-          echo "All repos cloned. Total: $(ls ~/repos | wc -l)"
-
-      # ============================================================
-      # CACHE: Restore provider packages (~/.cache/opencode)
-      # ============================================================
-      - name: Restore Provider Package Cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/opencode
-          key: opencode-provider-cache-${{ runner.os }}
-          restore-keys: |
-            opencode-provider-cache-
 
       # ============================================================
       # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
@@ -98,40 +77,60 @@ jobs:
             echo "Found restore directory, checking contents..."
             find /tmp/opencode-restore -type f 2>/dev/null || echo "No files found"
             
-            mkdir -p ~/.config/opencode ~/.local/share/opencode
-
+            # Create necessary directories for OpenCode
+            mkdir -p ~/.config/opencode ~/.local/share/opencode/project ~/.local/state/opencode
+            
+            # Create necessary directories for OpenChamber
+            mkdir -p ~/.config/openchamber
+            
+            # Restore OpenCode config files
             if [ -d "/tmp/opencode-restore/config" ]; then
-              echo "Restoring config files..."
+              echo "Restoring OpenCode config files..."
               cp -rv /tmp/opencode-restore/config/* ~/.config/opencode/ 2>/dev/null || true
             fi
-
-            if [ -f "/tmp/opencode-restore/opencode.db" ]; then
-              cp -v /tmp/opencode-restore/opencode.db ~/.local/share/opencode/opencode.db 2>/dev/null || true
-            fi
-            if [ -f "/tmp/opencode-restore/opencode.db-wal" ]; then
-              cp -v /tmp/opencode-restore/opencode.db-wal ~/.local/share/opencode/opencode.db-wal 2>/dev/null || true
-            fi
-            if [ -f "/tmp/opencode-restore/opencode.db-shm" ]; then
-              cp -v /tmp/opencode-restore/opencode.db-shm ~/.local/share/opencode/opencode.db-shm 2>/dev/null || true
-            fi
-
+            
+            # Restore OpenChamber config files (settings, themes)
             if [ -d "/tmp/opencode-restore/openchamber" ]; then
-              mkdir -p ~/.config/openchamber
+              echo "Restoring OpenChamber config files..."
               cp -rv /tmp/opencode-restore/openchamber/* ~/.config/openchamber/ 2>/dev/null || true
             fi
-
-            if [ -d "/tmp/opencode-restore/openchamber-share" ]; then
-              mkdir -p ~/.local/share/openchamber
-              cp -rv /tmp/opencode-restore/openchamber-share/* ~/.local/share/openchamber/ 2>/dev/null || true
+            
+            # Restore auth.json
+            if [ -f "/tmp/opencode-restore/auth.json" ]; then
+              echo "Restoring auth.json..."
+              cp -v /tmp/opencode-restore/auth.json ~/.local/share/opencode/auth.json 2>/dev/null || true
             fi
-
+            
+            # Restore SQLite database files
+            if [ -f "/tmp/opencode-restore/opencode.db" ]; then
+              echo "Restoring SQLite database..."
+              cp -v /tmp/opencode-restore/opencode.db* ~/.local/share/opencode/ 2>/dev/null || true
+            fi
+            
+            # Restore state directory
+            if [ -d "/tmp/opencode-restore/state" ]; then
+              echo "Restoring state directory..."
+              cp -rv /tmp/opencode-restore/state/* ~/.local/state/opencode/ 2>/dev/null || true
+            fi
+            
+            # Restore project sessions (NEW LOCATION)
+            if [ -d "/tmp/opencode-restore/project" ]; then
+              echo "Restoring project sessions..."
+              cp -rv /tmp/opencode-restore/project/* ~/.local/share/opencode/project/ 2>/dev/null || true
+              echo "Sessions restored: $(find ~/.local/share/opencode/project -type f 2>/dev/null | wc -l) files"
+            fi
+            
+            # Restore legacy storage (if exists)
+            if [ -d "/tmp/opencode-restore/storage" ]; then
+              echo "Restoring legacy storage..."
+              mkdir -p ~/.local/share/opencode/storage
+              cp -rv /tmp/opencode-restore/storage/* ~/.local/share/opencode/storage/ 2>/dev/null || true
+            fi
+            
             echo "Session restored successfully!"
           else
             echo "No previous session found. Fresh start."
           fi
-
-          echo '{"openai":{"type":"api","key":"sk-gpt"},"boxu":{"type":"api","key":"sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"}}' > ~/.local/share/opencode/auth.json
-          echo "Auth credentials written."
       # ============================================================
       # CACHE: Speed up npm installations
       # ============================================================
@@ -155,16 +154,47 @@ jobs:
           # coreutils provides stdbuf to prevent log buffering during auth
           sudo apt update && sudo apt install jq lsof coreutils -y 
 
-      - name: Configure OpenCode
+      - name: Configure OpenCode (Complete Antigravity Suite)
         run: |
           mkdir -p ~/.config/opencode
-          if [ ! -f "$HOME/.config/opencode/opencode.json" ]; then
-            echo "No restored config found. Writing default config..."
-            cat << 'EOF' > ~/.config/opencode/opencode.json
+          cat << 'EOF' > ~/.config/opencode/opencode.json
           {
             "$schema": "https://opencode.ai/config.json",
             "plugin": ["opencode-antigravity-auth@beta"],
             "provider": {
+              "noobrouter": {
+                "apiKey": "sk-gpt",
+                "baseURL": "https://noobrouterproduction.azurewebsites.net/v1/responses",
+                "fallbackURLs": [
+                  "https://noobrouterproduction.azurewebsites.net/chat/completions",
+                  "https://noobrouterproduction.azurewebsites.net/v1"
+                ],
+                "models": {
+                  "gpt-5.4": {
+                    "name": "GPT-5.4 (NoobroRouter)",
+                    "limit": { "context": 1000000, "output": 128000 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "none": { "reasoning": { "effort": "none" } },
+                      "low": { "reasoning": { "effort": "low" } },
+                      "medium": { "reasoning": { "effort": "medium" } },
+                      "high": { "reasoning": { "effort": "high" } },
+                      "xhigh": { "reasoning": { "effort": "xhigh" } }
+                    }
+                  },
+                  "gpt-5.3-codex": {
+                    "name": "GPT-5.3-Codex (NoobroRouter)",
+                    "limit": { "context": 400000, "output": 128000 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "low": { "reasoning": { "effort": "low" } },
+                      "medium": { "reasoning": { "effort": "medium" } },
+                      "high": { "reasoning": { "effort": "high" } },
+                      "xhigh": { "reasoning": { "effort": "xhigh" } }
+                    }
+                  }
+                }
+              },
               "google": {
                 "models": {
                   "antigravity-gemini-3-pro": {
@@ -231,60 +261,13 @@ jobs:
                     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
                   }
                 }
-              },
-              "openai": {
-                "options": {
-                  "reasoningEffort": "xhigh",
-                  "reasoningSummary": "detailed"
-                },
-                "models": {
-                  "gpt-5.3-codex": {
-                    "name": "GPT-5.3 Codex",
-                    "limit": { "context": 272000, "output": 128000 }
-                  },
-                  "gpt-5.3-codex-spark": {
-                    "name": "GPT-5.3 Codex Spark",
-                    "limit": { "context": 272000, "output": 128000 }
-                  },
-                  "gpt-5.4": {
-                    "name": "GPT-5.4",
-                    "limit": { "context": 1048576, "output": 128000 }
-                  }
-                }
-              },
-              "boxu": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "Boxu",
-                "options": {
-                  "baseURL": "https://ai.boxu.dev/v1",
-                  "apiKey": "sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e"
-                },
-                "models": {
-                  "max/claude-opus-4-6": {
-                    "name": "Claude Opus 4.6 (Boxu)",
-                    "limit": { "context": 200000, "output": 64000 }
-                  }
-                }
               }
             }
           }
           EOF
-            echo "Config written."
-          else
-            echo "Restored config found. Skipping default write."
-          fi
 
       - name: Initial Startup
-        env:
-          OPENAI_API_KEY: sk-gpt
-          OPENAI_BASE_URL: https://noobrouterproduction.azurewebsites.net/v1
-          BOXU_API_KEY: sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e
-          BOXU_BASE_URL: https://ai.boxu.dev/v1
         run: |
-          echo "Testing Boxu proxy connection..."
-          curl -s -o /dev/null -w "Boxu HTTP status: %{http_code}\n" \
-            -H "Authorization: Bearer sk-09832e2b5054420ea275636d0d93fada1f8a869fbddd001e" \
-            https://ai.boxu.dev/v1/models || echo "Warning: Boxu check failed"
           nohup stdbuf -oL opencode web --port 8080 > opencode.log 2>&1 &
           nohup stdbuf -oL openchamber --port 9090 > openchamber.log 2>&1 &
           sleep 20
@@ -351,22 +334,6 @@ jobs:
             fi
             
             tail -n 1 openchamber.log
-            
-            # Check all repos for remote updates and pull if changed
-            for repo_dir in ~/repos/*/; do
-              if [ -d "$repo_dir/.git" ]; then
-                cd "$repo_dir"
-                git fetch origin --quiet 2>/dev/null || true
-                LOCAL=$(git rev-parse HEAD 2>/dev/null)
-                REMOTE=$(git rev-parse "@{u}" 2>/dev/null)
-                if [ "$LOCAL" != "$REMOTE" ] && [ -n "$REMOTE" ]; then
-                  echo "[$(date)] Update detected in $(basename $repo_dir), pulling..."
-                  git pull --rebase origin 2>/dev/null || true
-                fi
-                cd ~/repos
-              fi
-            done
-
             sleep 5
           done
 
@@ -374,33 +341,57 @@ jobs:
         if: always()
         run: |
           echo "Preparing session data for persistence..."
-          mkdir -p /tmp/opencode-save/config /tmp/opencode-save/openchamber
+          mkdir -p /tmp/opencode-save/config /tmp/opencode-save/openchamber /tmp/opencode-save/project /tmp/opencode-save/state /tmp/opencode-save/storage
           
+          # Save OpenCode config from ~/.config/opencode into config/
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A $HOME/.config/opencode 2>/dev/null)" ]; then
-            rsync -av --exclude='node_modules' --exclude='bun.lock' --exclude='*.lock' \
-              $HOME/.config/opencode/ /tmp/opencode-save/config/ 2>/dev/null || true
-            echo "Config saved: $(ls -la /tmp/opencode-save/config/ 2>/dev/null | wc -l) files"
+            cp -rv $HOME/.config/opencode/* /tmp/opencode-save/config/ 2>/dev/null || true
+            echo "OpenCode config saved: $(ls -la /tmp/opencode-save/config/ 2>/dev/null | wc -l) files"
           else
-            echo "No config data to save"
+            echo "No OpenCode config data to save"
           fi
-
+          
+          # Save OpenChamber config (settings, themes) from ~/.config/openchamber
           if [ -d "$HOME/.config/openchamber" ] && [ "$(ls -A $HOME/.config/openchamber 2>/dev/null)" ]; then
-            rsync -av $HOME/.config/openchamber/ /tmp/opencode-save/openchamber/ 2>/dev/null || true
-            echo "OpenChamber config saved"
+            cp -rv $HOME/.config/openchamber/* /tmp/opencode-save/openchamber/ 2>/dev/null || true
+            echo "OpenChamber config saved: $(find $HOME/.config/openchamber -type f 2>/dev/null | wc -l) files"
+          else
+            echo "No OpenChamber config data to save"
           fi
-
-          if [ -d "$HOME/.local/share/openchamber" ] && [ "$(ls -A $HOME/.local/share/openchamber 2>/dev/null)" ]; then
-            mkdir -p /tmp/opencode-save/openchamber-share
-            rsync -av $HOME/.local/share/openchamber/ /tmp/opencode-save/openchamber-share/ 2>/dev/null || true
+          
+          # Save auth.json
+          if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
+            cp -v $HOME/.local/share/opencode/auth.json /tmp/opencode-save/auth.json 2>/dev/null || true
+            echo "Auth data saved"
           fi
-
-          for f in opencode.db opencode.db-wal opencode.db-shm; do
-            if [ -f "$HOME/.local/share/opencode/$f" ]; then
-              cp -v $HOME/.local/share/opencode/$f /tmp/opencode-save/$f 2>/dev/null || true
-              echo "$f saved: $(du -sh $HOME/.local/share/opencode/$f | cut -f1)"
-            fi
-          done
-
+          
+          # Save SQLite database files (v1.2.0+)
+          if [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
+            cp -v $HOME/.local/share/opencode/opencode.db* /tmp/opencode-save/ 2>/dev/null || true
+            echo "SQLite database saved: $(ls -la /tmp/opencode-save/opencode.db* 2>/dev/null | wc -l) files"
+          fi
+          
+          # Save state directory
+          if [ -d "$HOME/.local/state/opencode" ] && [ "$(ls -A $HOME/.local/state/opencode 2>/dev/null)" ]; then
+            cp -rv $HOME/.local/state/opencode/* /tmp/opencode-save/state/ 2>/dev/null || true
+            echo "State data saved: $(find $HOME/.local/state/opencode -type f 2>/dev/null | wc -l) files"
+          fi
+          
+          # Save project sessions from NEW LOCATION: ~/.local/share/opencode/project/
+          if [ -d "$HOME/.local/share/opencode/project" ] && [ "$(ls -A $HOME/.local/share/opencode/project 2>/dev/null)" ]; then
+            cp -rv $HOME/.local/share/opencode/project/* /tmp/opencode-save/project/ 2>/dev/null || true
+            echo "Project sessions saved: $(find $HOME/.local/share/opencode/project -type f 2>/dev/null | wc -l) files"
+          else
+            echo "No project session data to save"
+          fi
+          
+          # Save legacy storage (sessions, messages, parts) if they exist
+          if [ -d "$HOME/.local/share/opencode/storage" ] && [ "$(ls -A $HOME/.local/share/opencode/storage 2>/dev/null)" ]; then
+            cp -rv $HOME/.local/share/opencode/storage/* /tmp/opencode-save/storage/ 2>/dev/null || true
+            echo "Legacy storage saved: $(find $HOME/.local/share/opencode/storage -type f 2>/dev/null | wc -l) files"
+          fi
+          
+          # Verify we have something to save
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
             echo "Session data prepared successfully: $(find /tmp/opencode-save -type f | wc -l) files total"
             ls -la /tmp/opencode-save/
@@ -415,6 +406,6 @@ jobs:
         with:
           name: opencode-session
           path: /tmp/opencode-save/
-          retention-days: 90
+          retention-days: 30
           overwrite: true
           if-no-files-found: warn
