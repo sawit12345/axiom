@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       tunnel_provider:
-        description: 'Select Tunnel Provider'
+        description: "Select Tunnel Provider"
         required: true
-        default: 'cloudflare'
+        default: "cloudflare"
         type: choice
         options:
           - ngrok
           - cloudflare
       timeout_minutes:
-        description: 'Auto-shutdown after (minutes)'
+        description: "Auto-shutdown after (minutes)"
         required: true
-        default: '300'
+        default: "300"
         type: string
 
 permissions:
@@ -38,18 +38,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
         run: |
-          mkdir -p ~/repos
-          cd ~/repos
-          
-          # Get list of all your repos
-          repos=$(curl -H "Authorization: token $GH_TOKEN" \
+          mkdir -p "$HOME/repos"
+          cd "$HOME/repos"
+
+          repos=$(curl -fsSL \
+            -H "Authorization: token $GH_TOKEN" \
             "https://api.github.com/user/repos?per_page=100&affiliation=owner" \
             | jq -r '.[].clone_url')
-          
-          # Clone each repo
+
           for repo in $repos; do
             echo "Cloning $repo..."
-            git clone https://$GH_TOKEN@${repo#https://} || true
+            git clone "https://$GH_TOKEN@${repo#https://}" || true
           done
 
       # ============================================================
@@ -72,65 +71,58 @@ jobs:
           echo "=== RESTORE DEBUG ==="
           echo "Contents of /tmp/opencode-restore:"
           ls -la /tmp/opencode-restore/ 2>/dev/null || echo "Directory does not exist"
-          
+
           if [ -d "/tmp/opencode-restore" ]; then
             echo "Found restore directory, checking contents..."
             find /tmp/opencode-restore -type f 2>/dev/null || echo "No files found"
-            
-            # Create necessary directories for OpenCode
-            mkdir -p ~/.config/opencode ~/.local/share/opencode/project ~/.local/state/opencode
-            
-            # Create necessary directories for OpenChamber
-            mkdir -p ~/.config/openchamber
-            
-            # Restore OpenCode config files
+
+            mkdir -p "$HOME/.config/opencode" \
+                     "$HOME/.local/share/opencode/project" \
+                     "$HOME/.local/state/opencode" \
+                     "$HOME/.config/openchamber"
+
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring OpenCode config files..."
-              cp -rv /tmp/opencode-restore/config/* ~/.config/opencode/ 2>/dev/null || true
+              cp -rv /tmp/opencode-restore/config/* "$HOME/.config/opencode/" 2>/dev/null || true
             fi
-            
-            # Restore OpenChamber config files (settings, themes)
+
             if [ -d "/tmp/opencode-restore/openchamber" ]; then
               echo "Restoring OpenChamber config files..."
-              cp -rv /tmp/opencode-restore/openchamber/* ~/.config/openchamber/ 2>/dev/null || true
+              cp -rv /tmp/opencode-restore/openchamber/* "$HOME/.config/openchamber/" 2>/dev/null || true
             fi
-            
-            # Restore auth.json
+
             if [ -f "/tmp/opencode-restore/auth.json" ]; then
               echo "Restoring auth.json..."
-              cp -v /tmp/opencode-restore/auth.json ~/.local/share/opencode/auth.json 2>/dev/null || true
+              cp -v /tmp/opencode-restore/auth.json "$HOME/.local/share/opencode/auth.json" 2>/dev/null || true
             fi
-            
-            # Restore SQLite database files
+
             if [ -f "/tmp/opencode-restore/opencode.db" ]; then
               echo "Restoring SQLite database..."
-              cp -v /tmp/opencode-restore/opencode.db* ~/.local/share/opencode/ 2>/dev/null || true
+              cp -v /tmp/opencode-restore/opencode.db* "$HOME/.local/share/opencode/" 2>/dev/null || true
             fi
-            
-            # Restore state directory
+
             if [ -d "/tmp/opencode-restore/state" ]; then
               echo "Restoring state directory..."
-              cp -rv /tmp/opencode-restore/state/* ~/.local/state/opencode/ 2>/dev/null || true
+              cp -rv /tmp/opencode-restore/state/* "$HOME/.local/state/opencode/" 2>/dev/null || true
             fi
-            
-            # Restore project sessions (NEW LOCATION)
+
             if [ -d "/tmp/opencode-restore/project" ]; then
               echo "Restoring project sessions..."
-              cp -rv /tmp/opencode-restore/project/* ~/.local/share/opencode/project/ 2>/dev/null || true
-              echo "Sessions restored: $(find ~/.local/share/opencode/project -type f 2>/dev/null | wc -l) files"
+              cp -rv /tmp/opencode-restore/project/* "$HOME/.local/share/opencode/project/" 2>/dev/null || true
+              echo "Sessions restored: $(find "$HOME/.local/share/opencode/project" -type f 2>/dev/null | wc -l) files"
             fi
-            
-            # Restore legacy storage (if exists)
+
             if [ -d "/tmp/opencode-restore/storage" ]; then
               echo "Restoring legacy storage..."
-              mkdir -p ~/.local/share/opencode/storage
-              cp -rv /tmp/opencode-restore/storage/* ~/.local/share/opencode/storage/ 2>/dev/null || true
+              mkdir -p "$HOME/.local/share/opencode/storage"
+              cp -rv /tmp/opencode-restore/storage/* "$HOME/.local/share/opencode/storage/" 2>/dev/null || true
             fi
-            
+
             echo "Session restored successfully!"
           else
             echo "No previous session found. Fresh start."
           fi
+
       # ============================================================
       # CACHE: Speed up npm installations
       # ============================================================
@@ -151,50 +143,13 @@ jobs:
       - name: Install Tools
         run: |
           npm install -g opencode-ai @openchamber/web
-          # coreutils provides stdbuf to prevent log buffering during auth
-          sudo apt update && sudo apt install jq lsof coreutils nginx -y 
-
-      - name: Configure Nginx Reverse Proxy (Fix SSE Buffering)
-        run: |
-          sudo tee /etc/nginx/sites-available/openchamber << 'EOF'
-          server {
-              listen 8080;
-              server_name _;
-              
-              location / {
-                  proxy_pass http://127.0.0.1:9090;
-                  proxy_http_version 1.1;
-                  
-                  # Disable buffering for SSE
-                  proxy_buffering off;
-                  proxy_cache off;
-                  
-                  # SSE-specific headers
-                  proxy_set_header Connection '';
-                  proxy_set_header X-Accel-Buffering no;
-                  
-                  # Standard proxy headers
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_set_header X-Forwarded-Proto $scheme;
-                  
-                  # Increase timeouts for long-lived connections
-                  proxy_read_timeout 3600s;
-                  proxy_send_timeout 3600s;
-              }
-          }
-          EOF
-          
-          sudo ln -sf /etc/nginx/sites-available/openchamber /etc/nginx/sites-enabled/
-          sudo rm -f /etc/nginx/sites-enabled/default
-          sudo nginx -t
-          sudo systemctl restart nginx
+          sudo apt update
+          sudo apt install -y jq lsof coreutils curl wget
 
       - name: Configure OpenCode (Complete Antigravity Suite)
         run: |
-          mkdir -p ~/.config/opencode
-          cat << 'EOF' > ~/.config/opencode/opencode.json
+          mkdir -p "$HOME/.config/opencode"
+          cat << 'EOF' > "$HOME/.config/opencode/opencode.json"
           {
             "$schema": "https://opencode.ai/config.json",
             "plugin": ["opencode-antigravity-auth@beta"],
@@ -278,24 +233,67 @@ jobs:
 
       - name: Initial Startup
         run: |
-          nohup stdbuf -oL opencode web --port 8080 > opencode.log 2>&1 &
-          nohup stdbuf -oL openchamber --port 9090 > openchamber.log 2>&1 &
-          sleep 20
-          
+          # Run only OpenChamber directly.
+          # Default documented mode is serving the web UI itself on port 3000.
+          nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
+
+          echo "Waiting for OpenChamber to start..."
+          for i in $(seq 1 30); do
+            if lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
+              echo "OpenChamber is listening on port 3000"
+              break
+            fi
+            sleep 2
+          done
+
+          if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
+            echo "OpenChamber failed to start"
+            tail -n 200 openchamber.log || true
+            exit 1
+          fi
+
           if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
-            curl -s https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+            curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
             echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-            sudo apt update && sudo apt install ngrok -y
+            sudo apt update
+            sudo apt install -y ngrok
             ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
-            nohup ngrok http 127.0.0.1:8080 --log=stdout > tunnel.log 2>&1 &
-            sleep 10
-            echo "URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')" >> $GITHUB_ENV
+            nohup ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
+
+            echo "Waiting for ngrok URL..."
+            for i in $(seq 1 20); do
+              URL=$(curl -fsSL http://127.0.0.1:4040/api/tunnels 2>/dev/null | jq -r '.tunnels[0].public_url // empty')
+              if [ -n "$URL" ]; then
+                echo "URL=$URL" >> "$GITHUB_ENV"
+                echo "Tunnel ready: $URL"
+                break
+              fi
+              sleep 2
+            done
           else
             wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
             sudo dpkg -i cloudflared-linux-amd64.deb
-            nohup cloudflared tunnel --protocol http2 --no-chunked-encoding --url http://127.0.0.1:8080 > tunnel.log 2>&1 &
-            sleep 15
-            echo "URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)" >> $GITHUB_ENV
+            nohup cloudflared tunnel --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
+
+            echo "Waiting for Cloudflare URL..."
+            for i in $(seq 1 20); do
+              URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1 || true)
+              if [ -n "$URL" ]; then
+                echo "URL=$URL" >> "$GITHUB_ENV"
+                echo "Tunnel ready: $URL"
+                break
+              fi
+              sleep 2
+            done
+          fi
+
+          if ! grep -q '^URL=' "$GITHUB_ENV"; then
+            echo "Tunnel failed to produce a public URL"
+            echo "=== openchamber.log ==="
+            tail -n 200 openchamber.log || true
+            echo "=== tunnel.log ==="
+            tail -n 200 tunnel.log || true
+            exit 1
           fi
 
       - name: Monitor & Self-Heal
@@ -305,51 +303,49 @@ jobs:
           echo "AUTO-SHUTDOWN IN: ${{ github.event.inputs.timeout_minutes }} minute(s)"
           echo "All your repos available at: ~/repos/"
           echo "------------------------------------------"
-          
+
           START_TIME=$(date +%s)
           TIMEOUT_SECONDS=$(( ${{ github.event.inputs.timeout_minutes }} * 60 ))
-          
+
           while true; do
             ELAPSED=$(( $(date +%s) - START_TIME ))
             REMAINING=$(( TIMEOUT_SECONDS - ELAPSED ))
-            
-            if [ $REMAINING -le 0 ]; then
+
+            if [ "$REMAINING" -le 0 ]; then
               echo "[$(date)] Timeout reached. Initiating graceful shutdown..."
-              pkill -f "opencode|openchamber|ngrok|cloudflared" 2>/dev/null || true
+              pkill -f "openchamber|ngrok|cloudflared" 2>/dev/null || true
               break
             fi
-            
-            if [ $(( ELAPSED % 300 )) -lt 10 ]; then
+
+            if [ $(( ELAPSED % 300 )) -lt 5 ]; then
               echo "[$(date)] Time remaining: $(( REMAINING / 60 )) minutes"
             fi
-            
-            if ! lsof -i :9090 > /dev/null; then
+
+            if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
               echo "[$(date)] Restoring OpenChamber..."
-              nohup stdbuf -oL openchamber --port 9090 >> openchamber.log 2>&1 &
+              nohup stdbuf -oL openchamber --port 3000 >> openchamber.log 2>&1 &
               sleep 10
             fi
 
-            if ! lsof -i :8080 > /dev/null; then
-              echo "[$(date)] Restoring Nginx..."
-              sudo systemctl restart nginx
-              sleep 5
+            if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
+              if ! pgrep -f "ngrok http 3000" >/dev/null 2>&1; then
+                echo "[$(date)] Re-hosting ngrok tunnel..."
+                nohup ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
+                sleep 10
+                URL=$(curl -fsSL http://127.0.0.1:4040/api/tunnels 2>/dev/null | jq -r '.tunnels[0].public_url // empty')
+                [ -n "$URL" ] && echo "NEW LINK: $URL"
+              fi
+            else
+              if ! pgrep -f "cloudflared tunnel --url http://127.0.0.1:3000" >/dev/null 2>&1; then
+                echo "[$(date)] Re-hosting Cloudflare tunnel..."
+                nohup cloudflared tunnel --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
+                sleep 15
+                URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1 || true)
+                [ -n "$URL" ] && echo "NEW LINK: $URL"
+              fi
             fi
 
-            if ! pgrep -f "ngrok|cloudflared" > /dev/null; then
-              echo "[$(date)] Re-hosting tunnel..."
-              if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
-                nohup ngrok http 127.0.0.1:8080 --log=stdout > tunnel.log 2>&1 &
-                sleep 10
-                URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
-              else
-                nohup cloudflared tunnel --protocol http2 --no-chunked-encoding --url http://127.0.0.1:8080 > tunnel.log 2>&1 &
-                sleep 15
-                URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)
-              fi
-              echo "NEW LINK: $URL"
-            fi
-            
-            tail -n 1 openchamber.log
+            tail -n 1 openchamber.log 2>/dev/null || true
             sleep 5
           done
 
@@ -357,57 +353,53 @@ jobs:
         if: always()
         run: |
           echo "Preparing session data for persistence..."
-          mkdir -p /tmp/opencode-save/config /tmp/opencode-save/openchamber /tmp/opencode-save/project /tmp/opencode-save/state /tmp/opencode-save/storage
-          
-          # Save OpenCode config from ~/.config/opencode into config/
-          if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A $HOME/.config/opencode 2>/dev/null)" ]; then
-            cp -rv $HOME/.config/opencode/* /tmp/opencode-save/config/ 2>/dev/null || true
+          mkdir -p /tmp/opencode-save/config \
+                   /tmp/opencode-save/openchamber \
+                   /tmp/opencode-save/project \
+                   /tmp/opencode-save/state \
+                   /tmp/opencode-save/storage
+
+          if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
             echo "OpenCode config saved: $(ls -la /tmp/opencode-save/config/ 2>/dev/null | wc -l) files"
           else
             echo "No OpenCode config data to save"
           fi
-          
-          # Save OpenChamber config (settings, themes) from ~/.config/openchamber
-          if [ -d "$HOME/.config/openchamber" ] && [ "$(ls -A $HOME/.config/openchamber 2>/dev/null)" ]; then
-            cp -rv $HOME/.config/openchamber/* /tmp/opencode-save/openchamber/ 2>/dev/null || true
-            echo "OpenChamber config saved: $(find $HOME/.config/openchamber -type f 2>/dev/null | wc -l) files"
+
+          if [ -d "$HOME/.config/openchamber" ] && [ "$(ls -A "$HOME/.config/openchamber" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.config/openchamber/"* /tmp/opencode-save/openchamber/ 2>/dev/null || true
+            echo "OpenChamber config saved: $(find "$HOME/.config/openchamber" -type f 2>/dev/null | wc -l) files"
           else
             echo "No OpenChamber config data to save"
           fi
-          
-          # Save auth.json
+
           if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
-            cp -v $HOME/.local/share/opencode/auth.json /tmp/opencode-save/auth.json 2>/dev/null || true
+            cp -v "$HOME/.local/share/opencode/auth.json" /tmp/opencode-save/auth.json 2>/dev/null || true
             echo "Auth data saved"
           fi
-          
-          # Save SQLite database files (v1.2.0+)
+
           if [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
-            cp -v $HOME/.local/share/opencode/opencode.db* /tmp/opencode-save/ 2>/dev/null || true
+            cp -v "$HOME/.local/share/opencode/opencode.db"* /tmp/opencode-save/ 2>/dev/null || true
             echo "SQLite database saved: $(ls -la /tmp/opencode-save/opencode.db* 2>/dev/null | wc -l) files"
           fi
-          
-          # Save state directory
-          if [ -d "$HOME/.local/state/opencode" ] && [ "$(ls -A $HOME/.local/state/opencode 2>/dev/null)" ]; then
-            cp -rv $HOME/.local/state/opencode/* /tmp/opencode-save/state/ 2>/dev/null || true
-            echo "State data saved: $(find $HOME/.local/state/opencode -type f 2>/dev/null | wc -l) files"
+
+          if [ -d "$HOME/.local/state/opencode" ] && [ "$(ls -A "$HOME/.local/state/opencode" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/state/opencode/"* /tmp/opencode-save/state/ 2>/dev/null || true
+            echo "State data saved: $(find "$HOME/.local/state/opencode" -type f 2>/dev/null | wc -l) files"
           fi
-          
-          # Save project sessions from NEW LOCATION: ~/.local/share/opencode/project/
-          if [ -d "$HOME/.local/share/opencode/project" ] && [ "$(ls -A $HOME/.local/share/opencode/project 2>/dev/null)" ]; then
-            cp -rv $HOME/.local/share/opencode/project/* /tmp/opencode-save/project/ 2>/dev/null || true
-            echo "Project sessions saved: $(find $HOME/.local/share/opencode/project -type f 2>/dev/null | wc -l) files"
+
+          if [ -d "$HOME/.local/share/opencode/project" ] && [ "$(ls -A "$HOME/.local/share/opencode/project" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/share/opencode/project/"* /tmp/opencode-save/project/ 2>/dev/null || true
+            echo "Project sessions saved: $(find "$HOME/.local/share/opencode/project" -type f 2>/dev/null | wc -l) files"
           else
             echo "No project session data to save"
           fi
-          
-          # Save legacy storage (sessions, messages, parts) if they exist
-          if [ -d "$HOME/.local/share/opencode/storage" ] && [ "$(ls -A $HOME/.local/share/opencode/storage 2>/dev/null)" ]; then
-            cp -rv $HOME/.local/share/opencode/storage/* /tmp/opencode-save/storage/ 2>/dev/null || true
-            echo "Legacy storage saved: $(find $HOME/.local/share/opencode/storage -type f 2>/dev/null | wc -l) files"
+
+          if [ -d "$HOME/.local/share/opencode/storage" ] && [ "$(ls -A "$HOME/.local/share/opencode/storage" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/share/opencode/storage/"* /tmp/opencode-save/storage/ 2>/dev/null || true
+            echo "Legacy storage saved: $(find "$HOME/.local/share/opencode/storage" -type f 2>/dev/null | wc -l) files"
           fi
-          
-          # Verify we have something to save
+
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
             echo "Session data prepared successfully: $(find /tmp/opencode-save -type f | wc -l) files total"
             ls -la /tmp/opencode-save/
@@ -415,7 +407,7 @@ jobs:
             echo "No session data to save - creating placeholder"
             echo "$(date): No session data available" > /tmp/opencode-save/placeholder.txt
           fi
-          
+
       - name: Upload Session Data (Artifact)
         if: always()
         uses: actions/upload-artifact@v4
