@@ -151,7 +151,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          npm install -g opencode-ai @openchamber/web@1.8.4
+          npm install -g opencode-ai @openchamber/web@1.8.3
           # coreutils provides stdbuf to prevent log buffering during auth
           sudo apt update && sudo apt install jq lsof coreutils -y
 
