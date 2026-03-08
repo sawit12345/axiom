@@ -146,6 +146,17 @@ jobs:
           sudo apt update
           sudo apt install -y jq lsof coreutils curl wget
 
+          if [[ "${{ github.event.inputs.tunnel_provider }}" == "cloudflare" ]]; then
+            wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+            sudo dpkg -i cloudflared-linux-amd64.deb
+          else
+            curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+            echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+            sudo apt update
+            sudo apt install -y ngrok
+            ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
+          fi
+
       - name: Configure OpenCode (Complete Antigravity Suite)
         run: |
           mkdir -p "$HOME/.config/opencode"
@@ -233,8 +244,6 @@ jobs:
 
       - name: Initial Startup
         run: |
-          # Run only OpenChamber directly.
-          # Default documented mode is serving the web UI itself on port 3000.
           nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
 
           echo "Waiting for OpenChamber to start..."
@@ -248,41 +257,53 @@ jobs:
 
           if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
             echo "OpenChamber failed to start"
+            echo "=== openchamber.log ==="
             tail -n 200 openchamber.log || true
             exit 1
           fi
 
+          : > tunnel.log
+
           if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
-            curl -fsSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-            echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-            sudo apt update
-            sudo apt install -y ngrok
-            ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
-            nohup ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
+            nohup stdbuf -oL ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
 
             echo "Waiting for ngrok URL..."
-            for i in $(seq 1 20); do
+            for i in $(seq 1 30); do
               URL=$(curl -fsSL http://127.0.0.1:4040/api/tunnels 2>/dev/null | jq -r '.tunnels[0].public_url // empty')
               if [ -n "$URL" ]; then
                 echo "URL=$URL" >> "$GITHUB_ENV"
                 echo "Tunnel ready: $URL"
                 break
               fi
+
+              if ! pgrep -f "ngrok http 3000" >/dev/null 2>&1; then
+                echo "ngrok exited early"
+                echo "=== tunnel.log ==="
+                tail -n 200 tunnel.log || true
+                exit 1
+              fi
+
               sleep 2
             done
           else
-            wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-            sudo dpkg -i cloudflared-linux-amd64.deb
-            nohup cloudflared tunnel --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
+            nohup stdbuf -oL cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
 
             echo "Waiting for Cloudflare URL..."
-            for i in $(seq 1 20); do
-              URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1 || true)
+            for i in $(seq 1 45); do
+              URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | tail -n 1 || true)
               if [ -n "$URL" ]; then
                 echo "URL=$URL" >> "$GITHUB_ENV"
                 echo "Tunnel ready: $URL"
                 break
               fi
+
+              if ! pgrep -f "cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000" >/dev/null 2>&1; then
+                echo "cloudflared exited early"
+                echo "=== tunnel.log ==="
+                tail -n 200 tunnel.log || true
+                exit 1
+              fi
+
               sleep 2
             done
           fi
@@ -330,17 +351,19 @@ jobs:
             if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
               if ! pgrep -f "ngrok http 3000" >/dev/null 2>&1; then
                 echo "[$(date)] Re-hosting ngrok tunnel..."
-                nohup ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
+                : > tunnel.log
+                nohup stdbuf -oL ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
                 sleep 10
                 URL=$(curl -fsSL http://127.0.0.1:4040/api/tunnels 2>/dev/null | jq -r '.tunnels[0].public_url // empty')
                 [ -n "$URL" ] && echo "NEW LINK: $URL"
               fi
             else
-              if ! pgrep -f "cloudflared tunnel --url http://127.0.0.1:3000" >/dev/null 2>&1; then
+              if ! pgrep -f "cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000" >/dev/null 2>&1; then
                 echo "[$(date)] Re-hosting Cloudflare tunnel..."
-                nohup cloudflared tunnel --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
+                : > tunnel.log
+                nohup stdbuf -oL cloudflared tunnel --no-autoupdate --url http://127.0.0.1:3000 > tunnel.log 2>&1 &
                 sleep 15
-                URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1 || true)
+                URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | tail -n 1 || true)
                 [ -n "$URL" ] && echo "NEW LINK: $URL"
               fi
             fi
