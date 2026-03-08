@@ -6,7 +6,7 @@ on:
       tunnel_provider:
         description: "Select Tunnel Provider"
         required: true
-        default: "cloudflare"
+        default: "ngrok"
         type: choice
         options:
           - ngrok
