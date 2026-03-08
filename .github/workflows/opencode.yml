@@ -256,7 +256,7 @@ jobs:
           else
             wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
             sudo dpkg -i cloudflared-linux-amd64.deb
-            nohup cloudflared tunnel --protocol http2 --url http://127.0.0.1:9090 > tunnel.log 2>&1 &
+            nohup cloudflared tunnel --protocol http2 --no-chunked-encoding --url http://127.0.0.1:9090 > tunnel.log 2>&1 &
             sleep 15
             echo "URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)" >> $GITHUB_ENV
           fi
@@ -299,7 +299,7 @@ jobs:
                 sleep 10
                 URL=$(curl -s http://localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')
               else
-                nohup cloudflared tunnel --protocol http2 --url http://127.0.0.1:9090 > tunnel.log 2>&1 &
+                nohup cloudflared tunnel --protocol http2 --no-chunked-encoding --url http://127.0.0.1:9090 > tunnel.log 2>&1 &
                 sleep 15
                 URL=$(grep -o 'https://[-a-z0-9.]*trycloudflare.com' tunnel.log | tail -n 1)
               fi
