@@ -79,7 +79,12 @@ jobs:
             mkdir -p "$HOME/.config/opencode" \
                      "$HOME/.local/share/opencode/project" \
                      "$HOME/.local/state/opencode" \
-                     "$HOME/.config/openchamber"
+                     "$HOME/.config/openchamber" \
+                     "$HOME/.config/opencode-worktree" \
+                     "$HOME/.local/share/opencode/worktree" \
+                     "$HOME/.local/share/opencode/bin" \
+                     "$HOME/.local/share/opencode/log" \
+                     "$HOME/.cache/opencode"
 
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring OpenCode config files..."
@@ -89,6 +94,11 @@ jobs:
             if [ -d "/tmp/opencode-restore/openchamber" ]; then
               echo "Restoring OpenChamber config files..."
               cp -rv /tmp/opencode-restore/openchamber/* "$HOME/.config/openchamber/" 2>/dev/null || true
+            fi
+
+            if [ -d "/tmp/opencode-restore/opencode-worktree" ]; then
+              echo "Restoring Worktree config files..."
+              cp -rv /tmp/opencode-restore/opencode-worktree/* "$HOME/.config/opencode-worktree/" 2>/dev/null || true
             fi
 
             if [ -f "/tmp/opencode-restore/auth.json" ]; then
@@ -110,6 +120,28 @@ jobs:
               echo "Restoring project sessions..."
               cp -rv /tmp/opencode-restore/project/* "$HOME/.local/share/opencode/project/" 2>/dev/null || true
               echo "Sessions restored: $(find "$HOME/.local/share/opencode/project" -type f 2>/dev/null | wc -l) files"
+            fi
+
+            if [ -d "/tmp/opencode-restore/worktree" ]; then
+              echo "Restoring git worktrees..."
+              cp -rv /tmp/opencode-restore/worktree/* "$HOME/.local/share/opencode/worktree/" 2>/dev/null || true
+              echo "Worktrees restored: $(find "$HOME/.local/share/opencode/worktree" -type f 2>/dev/null | wc -l) files"
+            fi
+
+            if [ -d "/tmp/opencode-restore/cache" ]; then
+              echo "Restoring cache..."
+              cp -rv /tmp/opencode-restore/cache/* "$HOME/.cache/opencode/" 2>/dev/null || true
+              echo "Cache restored: $(find "$HOME/.cache/opencode" -type f 2>/dev/null | wc -l) files"
+            fi
+
+            if [ -d "/tmp/opencode-restore/log" ]; then
+              echo "Restoring logs..."
+              cp -rv /tmp/opencode-restore/log/* "$HOME/.local/share/opencode/log/" 2>/dev/null || true
+            fi
+
+            if [ -d "/tmp/opencode-restore/bin" ]; then
+              echo "Restoring bin directory..."
+              cp -rv /tmp/opencode-restore/bin/* "$HOME/.local/share/opencode/bin/" 2>/dev/null || true
             fi
 
             if [ -d "/tmp/opencode-restore/storage" ]; then
@@ -168,7 +200,7 @@ jobs:
               "openai": {
                 "options": {
                   "baseURL": "https://noobrouterproduction.azurewebsites.net/v1",
-                  "apiKey": "sk-gpt"
+                  "apiKey": "sk-clawd"
                 }
               },
               "google": {
@@ -378,9 +410,14 @@ jobs:
           echo "Preparing session data for persistence..."
           mkdir -p /tmp/opencode-save/config \
                    /tmp/opencode-save/openchamber \
+                   /tmp/opencode-save/opencode-worktree \
                    /tmp/opencode-save/project \
+                   /tmp/opencode-save/worktree \
                    /tmp/opencode-save/state \
-                   /tmp/opencode-save/storage
+                   /tmp/opencode-save/storage \
+                   /tmp/opencode-save/cache \
+                   /tmp/opencode-save/log \
+                   /tmp/opencode-save/bin
 
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
@@ -394,6 +431,11 @@ jobs:
             echo "OpenChamber config saved: $(find "$HOME/.config/openchamber" -type f 2>/dev/null | wc -l) files"
           else
             echo "No OpenChamber config data to save"
+          fi
+
+          if [ -d "$HOME/.config/opencode-worktree" ] && [ "$(ls -A "$HOME/.config/opencode-worktree" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.config/opencode-worktree/"* /tmp/opencode-save/opencode-worktree/ 2>/dev/null || true
+            echo "Worktree config saved: $(find "$HOME/.config/opencode-worktree" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
@@ -418,9 +460,31 @@ jobs:
             echo "No project session data to save"
           fi
 
+          if [ -d "$HOME/.local/share/opencode/worktree" ] && [ "$(ls -A "$HOME/.local/share/opencode/worktree" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/share/opencode/worktree/"* /tmp/opencode-save/worktree/ 2>/dev/null || true
+            echo "Worktrees saved: $(find "$HOME/.local/share/opencode/worktree" -type f 2>/dev/null | wc -l) files"
+          else
+            echo "No worktree data to save"
+          fi
+
           if [ -d "$HOME/.local/share/opencode/storage" ] && [ "$(ls -A "$HOME/.local/share/opencode/storage" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/storage/"* /tmp/opencode-save/storage/ 2>/dev/null || true
             echo "Legacy storage saved: $(find "$HOME/.local/share/opencode/storage" -type f 2>/dev/null | wc -l) files"
+          fi
+
+          if [ -d "$HOME/.cache/opencode" ] && [ "$(ls -A "$HOME/.cache/opencode" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.cache/opencode/"* /tmp/opencode-save/cache/ 2>/dev/null || true
+            echo "Cache saved: $(find "$HOME/.cache/opencode" -type f 2>/dev/null | wc -l) files"
+          fi
+
+          if [ -d "$HOME/.local/share/opencode/log" ] && [ "$(ls -A "$HOME/.local/share/opencode/log" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/share/opencode/log/"* /tmp/opencode-save/log/ 2>/dev/null || true
+            echo "Logs saved: $(find "$HOME/.local/share/opencode/log" -type f 2>/dev/null | wc -l) files"
+          fi
+
+          if [ -d "$HOME/.local/share/opencode/bin" ] && [ "$(ls -A "$HOME/.local/share/opencode/bin" 2>/dev/null)" ]; then
+            cp -rv "$HOME/.local/share/opencode/bin/"* /tmp/opencode-save/bin/ 2>/dev/null || true
+            echo "Bin directory saved: $(find "$HOME/.local/share/opencode/bin" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
