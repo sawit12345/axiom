@@ -51,9 +51,6 @@ jobs:
             git clone "https://$GH_TOKEN@${repo#https://}" || true
           done
 
-      # ============================================================
-      # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
-      # ============================================================
       - name: Restore Session Data (Artifact)
         uses: dawidd6/action-download-artifact@v6
         continue-on-error: true
@@ -155,9 +152,6 @@ jobs:
             echo "No previous session found. Fresh start."
           fi
 
-      # ============================================================
-      # CACHE: Speed up npm installations
-      # ============================================================
       - name: Cache npm modules
         uses: actions/cache@v4
         with:
@@ -189,84 +183,85 @@ jobs:
             ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
           fi
 
-      - name: Configure OpenCode (Complete Antigravity Suite)
+      - name: Configure OpenCode (ZAPI Gemini 3.1 Pro High)
         run: |
           mkdir -p "$HOME/.config/opencode"
           cat << 'EOF' > "$HOME/.config/opencode/opencode.json"
           {
             "$schema": "https://opencode.ai/config.json",
-            "plugin": ["opencode-antigravity-auth@beta"],
+            "model": "zapi/gemini-3.1-pro-high",
             "provider": {
-              "openai": {
+              "zapi": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "ZAPI",
                 "options": {
-                  "baseURL": "https://noobrouterproduction.azurewebsites.net/v1",
-                  "apiKey": "sk-clawd"
-                }
-              },
-              "google": {
+                  "baseURL": "https://zapi.aicc0.com/v1",
+                  "apiKey": "sk-5SquAZAd3ZTYtFyFmISL5foLhlr5afnAe78tiVBTKfx5ruWC"
+                },
                 "models": {
-                  "antigravity-gemini-3-pro": {
-                    "name": "Gemini 3 Pro (Antigravity)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "thinkingLevel": "low" },
-                      "high": { "thinkingLevel": "high" }
+                  "gemini-3.1-pro-high": {
+                    "name": "Gemini 3.1 Pro High (ZAPI)",
+                    "limit": {
+                      "context": 1048576,
+                      "output": 65535
+                    },
+                    "modalities": {
+                      "input": ["text", "image", "pdf"],
+                      "output": ["text"]
+                    },
+                    "options": {
+                      "extraBody": {
+                        "google": {
+                          "thinking_config": {
+                            "include_thoughts": true
+                          }
+                        }
+                      }
                     }
                   },
-                  "antigravity-gemini-3-flash": {
-                    "name": "Gemini 3 Flash (Antigravity)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "minimal": { "thinkingLevel": "minimal" },
-                      "low": { "thinkingLevel": "low" },
-                      "medium": { "thinkingLevel": "medium" },
-                      "high": { "thinkingLevel": "high" }
+                  "gemini-3.1-pro-low": {
+                    "name": "Gemini 3.1 Pro Low (ZAPI)",
+                    "limit": {
+                      "context": 1048576,
+                      "output": 65535
+                    },
+                    "modalities": {
+                      "input": ["text", "image", "pdf"],
+                      "output": ["text"]
                     }
                   },
-                  "antigravity-claude-sonnet-4-5": {
-                    "name": "Claude Sonnet 4.5 (no thinking) (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "antigravity-claude-sonnet-4-5-thinking": {
-                    "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+                  "gemini-3.1-pro-preview": {
+                    "name": "Gemini 3.1 Pro Preview (ZAPI)",
+                    "limit": {
+                      "context": 1048576,
+                      "output": 65535
+                    },
+                    "modalities": {
+                      "input": ["text", "image", "pdf"],
+                      "output": ["text"]
                     }
                   },
-                  "antigravity-claude-opus-4-5-thinking": {
-                    "name": "Claude Opus 4.5 Thinking (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+                  "gemini-2.5-pro": {
+                    "name": "Gemini 2.5 Pro (ZAPI)",
+                    "limit": {
+                      "context": 1048576,
+                      "output": 65536
+                    },
+                    "modalities": {
+                      "input": ["text", "image", "pdf"],
+                      "output": ["text"]
                     }
                   },
                   "gemini-2.5-flash": {
-                    "name": "Gemini 2.5 Flash (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-2.5-pro": {
-                    "name": "Gemini 2.5 Pro (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-flash-preview": {
-                    "name": "Gemini 3 Flash Preview (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-pro-preview": {
-                    "name": "Gemini 3 Pro Preview (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                    "name": "Gemini 2.5 Flash (ZAPI)",
+                    "limit": {
+                      "context": 1048576,
+                      "output": 65536
+                    },
+                    "modalities": {
+                      "input": ["text", "image", "pdf"],
+                      "output": ["text"]
+                    }
                   }
                 }
               }
