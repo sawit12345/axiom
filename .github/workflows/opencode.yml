@@ -51,9 +51,6 @@ jobs:
             git clone "https://$GH_TOKEN@${repo#https://}" || true
           done
 
-      # ============================================================
-      # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
-      # ============================================================
       - name: Restore Session Data (Artifact)
         uses: dawidd6/action-download-artifact@v6
         continue-on-error: true
@@ -155,9 +152,6 @@ jobs:
             echo "No previous session found. Fresh start."
           fi
 
-      # ============================================================
-      # CACHE: Speed up npm installations
-      # ============================================================
       - name: Cache npm modules
         uses: actions/cache@v4
         with:
@@ -174,7 +168,8 @@ jobs:
 
       - name: Install Tools
         run: |
-          npm install -g opencode-ai @openchamber/web
+          # Pin OpenChamber to 1.8.5 to avoid the 1.8.6 CLI regression
+          npm install -g opencode-ai @openchamber/web@1.8.5
           sudo apt update
           sudo apt install -y jq lsof coreutils curl wget
 
@@ -188,6 +183,13 @@ jobs:
             sudo apt install -y ngrok
             ngrok config add-authtoken "${{ secrets.NGROK_AUTH_TOKEN }}"
           fi
+
+      - name: Resolve OpenChamber CLI
+        run: |
+          OPENCHAMBER_CLI="$(readlink -f "$(command -v openchamber)")"
+          echo "OPENCHAMBER_CLI=$OPENCHAMBER_CLI" >> "$GITHUB_ENV"
+          echo "Resolved CLI: $OPENCHAMBER_CLI"
+          node "$OPENCHAMBER_CLI" --version || true
 
       - name: Create local ZAPI thought injector
         run: |
@@ -222,11 +224,7 @@ jobs:
 
           function copyHeaders(upstreamRes) {
             const headers = {};
-            if (upstreamRes.headers["content-type"]) {
-              headers["Content-Type"] = upstreamRes.headers["content-type"];
-            } else {
-              headers["Content-Type"] = "application/json";
-            }
+            headers["Content-Type"] = upstreamRes.headers["content-type"] || "application/json";
             return headers;
           }
 
@@ -347,7 +345,7 @@ jobs:
             exit 1
           fi
 
-      - name: Configure OpenCode (Complete Antigravity Suite)
+      - name: Configure OpenCode
         run: |
           mkdir -p "$HOME/.config/opencode"
           cat << 'EOF' > "$HOME/.config/opencode/opencode.json"
@@ -367,41 +365,6 @@ jobs:
                     "name": "Gemini 3.1 Pro High (ZAPI)",
                     "limit": { "context": 1048576, "output": 65535 },
                     "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3.1-pro-low": {
-                    "name": "Gemini 3.1 Pro Low (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3.1-pro-preview": {
-                    "name": "Gemini 3.1 Pro Preview (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-2.5-pro": {
-                    "name": "Gemini 2.5 Pro (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-2.5-flash": {
-                    "name": "Gemini 2.5 Flash (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-2.5-flash-lite": {
-                    "name": "Gemini 2.5 Flash Lite (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-flash-preview": {
-                    "name": "Gemini 3 Flash Preview (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-pro-preview": {
-                    "name": "Gemini 3 Pro Preview (ZAPI)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
                   }
                 }
               },
@@ -415,60 +378,6 @@ jobs:
                       "low": { "thinkingLevel": "low" },
                       "high": { "thinkingLevel": "high" }
                     }
-                  },
-                  "antigravity-gemini-3-flash": {
-                    "name": "Gemini 3 Flash (Antigravity)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "minimal": { "thinkingLevel": "minimal" },
-                      "low": { "thinkingLevel": "low" },
-                      "medium": { "thinkingLevel": "medium" },
-                      "high": { "thinkingLevel": "high" }
-                    }
-                  },
-                  "antigravity-claude-sonnet-4-5": {
-                    "name": "Claude Sonnet 4.5 (no thinking) (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "antigravity-claude-sonnet-4-5-thinking": {
-                    "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-                    }
-                  },
-                  "antigravity-claude-opus-4-5-thinking": {
-                    "name": "Claude Opus 4.5 Thinking (Antigravity)",
-                    "limit": { "context": 200000, "output": 64000 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
-                    "variants": {
-                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
-                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
-                    }
-                  },
-                  "gemini-2.5-flash": {
-                    "name": "Gemini 2.5 Flash (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-2.5-pro": {
-                    "name": "Gemini 2.5 Pro (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-flash-preview": {
-                    "name": "Gemini 3 Flash Preview (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65536 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-                  },
-                  "gemini-3-pro-preview": {
-                    "name": "Gemini 3 Pro Preview (Gemini CLI)",
-                    "limit": { "context": 1048576, "output": 65535 },
-                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
                   }
                 }
               }
@@ -478,7 +387,7 @@ jobs:
 
       - name: Initial Startup
         run: |
-          nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
+          nohup stdbuf -oL node "$OPENCHAMBER_CLI" --port 3000 > openchamber.log 2>&1 &
 
           echo "Waiting for OpenChamber to start..."
           for i in $(seq 1 30); do
@@ -580,14 +489,8 @@ jobs:
 
             if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
               echo "[$(date)] Restoring OpenChamber..."
-              nohup stdbuf -oL openchamber --port 3000 >> openchamber.log 2>&1 &
+              nohup stdbuf -oL node "$OPENCHAMBER_CLI" --port 3000 >> openchamber.log 2>&1 &
               sleep 10
-            fi
-
-            if ! pgrep -f "zapi-thought-proxy.js" >/dev/null 2>&1; then
-              echo "[$(date)] Restoring ZAPI thought proxy..."
-              nohup node "$HOME/zapi-thought-proxy.js" >> zapi-proxy.log 2>&1 &
-              sleep 3
             fi
 
             if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
@@ -631,77 +534,55 @@ jobs:
 
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
-            echo "OpenCode config saved: $(ls -la /tmp/opencode-save/config/ 2>/dev/null | wc -l) files"
-          else
-            echo "No OpenCode config data to save"
           fi
 
           if [ -d "$HOME/.config/openchamber" ] && [ "$(ls -A "$HOME/.config/openchamber" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/openchamber/"* /tmp/opencode-save/openchamber/ 2>/dev/null || true
-            echo "OpenChamber config saved: $(find "$HOME/.config/openchamber" -type f 2>/dev/null | wc -l) files"
-          else
-            echo "No OpenChamber config data to save"
           fi
 
           if [ -d "$HOME/.config/opencode-worktree" ] && [ "$(ls -A "$HOME/.config/opencode-worktree" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode-worktree/"* /tmp/opencode-save/opencode-worktree/ 2>/dev/null || true
-            echo "Worktree config saved: $(find "$HOME/.config/opencode-worktree" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -f "$HOME/.local/share/opencode/auth.json" ]; then
             cp -v "$HOME/.local/share/opencode/auth.json" /tmp/opencode-save/auth.json 2>/dev/null || true
-            echo "Auth data saved"
           fi
 
           if [ -f "$HOME/.local/share/opencode/opencode.db" ]; then
             cp -v "$HOME/.local/share/opencode/opencode.db"* /tmp/opencode-save/ 2>/dev/null || true
-            echo "SQLite database saved: $(ls -la /tmp/opencode-save/opencode.db* 2>/dev/null | wc -l) files"
           fi
 
           if [ -d "$HOME/.local/state/opencode" ] && [ "$(ls -A "$HOME/.local/state/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/state/opencode/"* /tmp/opencode-save/state/ 2>/dev/null || true
-            echo "State data saved: $(find "$HOME/.local/state/opencode" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -d "$HOME/.local/share/opencode/project" ] && [ "$(ls -A "$HOME/.local/share/opencode/project" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/project/"* /tmp/opencode-save/project/ 2>/dev/null || true
-            echo "Project sessions saved: $(find "$HOME/.local/share/opencode/project" -type f 2>/dev/null | wc -l) files"
-          else
-            echo "No project session data to save"
           fi
 
           if [ -d "$HOME/.local/share/opencode/worktree" ] && [ "$(ls -A "$HOME/.local/share/opencode/worktree" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/worktree/"* /tmp/opencode-save/worktree/ 2>/dev/null || true
-            echo "Worktrees saved: $(find "$HOME/.local/share/opencode/worktree" -type f 2>/dev/null | wc -l) files"
-          else
-            echo "No worktree data to save"
           fi
 
           if [ -d "$HOME/.local/share/opencode/storage" ] && [ "$(ls -A "$HOME/.local/share/opencode/storage" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/storage/"* /tmp/opencode-save/storage/ 2>/dev/null || true
-            echo "Legacy storage saved: $(find "$HOME/.local/share/opencode/storage" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -d "$HOME/.cache/opencode" ] && [ "$(ls -A "$HOME/.cache/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.cache/opencode/"* /tmp/opencode-save/cache/ 2>/dev/null || true
-            echo "Cache saved: $(find "$HOME/.cache/opencode" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -d "$HOME/.local/share/opencode/log" ] && [ "$(ls -A "$HOME/.local/share/opencode/log" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/log/"* /tmp/opencode-save/log/ 2>/dev/null || true
-            echo "Logs saved: $(find "$HOME/.local/share/opencode/log" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ -d "$HOME/.local/share/opencode/bin" ] && [ "$(ls -A "$HOME/.local/share/opencode/bin" 2>/dev/null)" ]; then
             cp -rv "$HOME/.local/share/opencode/bin/"* /tmp/opencode-save/bin/ 2>/dev/null || true
-            echo "Bin directory saved: $(find "$HOME/.local/share/opencode/bin" -type f 2>/dev/null | wc -l) files"
           fi
 
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-            echo "Session data prepared successfully: $(find /tmp/opencode-save -type f | wc -l) files total"
             ls -la /tmp/opencode-save/
           else
-            echo "No session data to save - creating placeholder"
             echo "$(date): No session data available" > /tmp/opencode-save/placeholder.txt
           fi
 
