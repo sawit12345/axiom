@@ -24,8 +24,6 @@ permissions:
 jobs:
   serve:
     runs-on: ubuntu-latest
-    env:
-      ZAPI_API_KEY: ${{ secrets.ZAPI_API_KEY }}
 
     steps:
       - name: Checkout repo
@@ -53,6 +51,9 @@ jobs:
             git clone "https://$GH_TOKEN@${repo#https://}" || true
           done
 
+      # ============================================================
+      # PERSISTENCE: Restore previous session (OAuth tokens, accounts)
+      # ============================================================
       - name: Restore Session Data (Artifact)
         uses: dawidd6/action-download-artifact@v6
         continue-on-error: true
@@ -154,6 +155,9 @@ jobs:
             echo "No previous session found. Fresh start."
           fi
 
+      # ============================================================
+      # CACHE: Speed up npm installations
+      # ============================================================
       - name: Cache npm modules
         uses: actions/cache@v4
         with:
@@ -187,7 +191,7 @@ jobs:
 
       - name: Create local ZAPI thought injector
         run: |
-          cat > "$HOME/zapi-thought-proxy.js" <<'EOF'
+          cat << 'EOF' > "$HOME/zapi-thought-proxy.js"
           const http = require("http");
           const https = require("https");
 
@@ -216,23 +220,27 @@ jobs:
             });
           }
 
-          function forwardGet(path, res) {
+          function copyHeaders(upstreamRes) {
+            const headers = {};
+            if (upstreamRes.headers["content-type"]) {
+              headers["Content-Type"] = upstreamRes.headers["content-type"];
+            } else {
+              headers["Content-Type"] = "application/json";
+            }
+            return headers;
+          }
+
+          function forwardModels(res) {
             const upstream = https.request({
               hostname: TARGET_HOST,
               port: 443,
-              path,
+              path: `${TARGET_BASE}/models`,
               method: "GET",
               headers: {
                 "Authorization": `Bearer ${API_KEY}`
               }
             }, upstreamRes => {
-              const headers = {};
-              if (upstreamRes.headers["content-type"]) {
-                headers["Content-Type"] = upstreamRes.headers["content-type"];
-              } else {
-                headers["Content-Type"] = "application/json";
-              }
-              res.writeHead(upstreamRes.statusCode || 200, headers);
+              res.writeHead(upstreamRes.statusCode || 200, copyHeaders(upstreamRes));
               upstreamRes.pipe(res);
             });
 
@@ -275,20 +283,7 @@ jobs:
                 "Content-Length": Buffer.byteLength(body)
               }
             }, upstreamRes => {
-              const headers = {};
-              if (upstreamRes.headers["content-type"]) {
-                headers["Content-Type"] = upstreamRes.headers["content-type"];
-              }
-              if (upstreamRes.headers["cache-control"]) {
-                headers["Cache-Control"] = upstreamRes.headers["cache-control"];
-              }
-              if (upstreamRes.headers["transfer-encoding"]) {
-                headers["Transfer-Encoding"] = upstreamRes.headers["transfer-encoding"];
-              }
-              if (upstreamRes.headers["connection"]) {
-                headers["Connection"] = upstreamRes.headers["connection"];
-              }
-              res.writeHead(upstreamRes.statusCode || 200, headers);
+              res.writeHead(upstreamRes.statusCode || 200, copyHeaders(upstreamRes));
               upstreamRes.pipe(res);
             });
 
@@ -302,16 +297,16 @@ jobs:
 
           const server = http.createServer(async (req, res) => {
             try {
+              if (req.method === "GET" && req.url === "/healthz") {
+                return sendJson(res, 200, { ok: true });
+              }
+
               if (req.method === "GET" && req.url === "/v1/models") {
-                return forwardGet(`${TARGET_BASE}/models`, res);
+                return forwardModels(res);
               }
 
               if (req.method === "POST" && req.url === "/v1/chat/completions") {
                 return forwardChat(req, res);
-              }
-
-              if (req.method === "GET" && req.url === "/healthz") {
-                return sendJson(res, 200, { ok: true });
               }
 
               return sendJson(res, 404, { error: { message: "not found" } });
@@ -326,6 +321,8 @@ jobs:
           EOF
 
       - name: Start local ZAPI thought injector
+        env:
+          ZAPI_API_KEY: ${{ secrets.ZAPI_API_KEY }}
         run: |
           if [ -z "$ZAPI_API_KEY" ]; then
             echo "Missing ZAPI_API_KEY secret"
@@ -350,28 +347,13 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke test proxy thoughts
-        run: |
-          curl -fsS http://127.0.0.1:4010/v1/chat/completions \
-            -H 'Content-Type: application/json' \
-            -d '{
-              "model": "gemini-3.1-pro-high",
-              "messages": [{"role":"user","content":"Reply with the word OK only."}],
-              "stream": false
-            }' | tee proxy-test.json
-
-          echo
-          echo "=== reasoning_content ==="
-          jq -r '.choices[0].message.reasoning_content // "null"' proxy-test.json
-
-      - name: Configure OpenCode
+      - name: Configure OpenCode (Complete Antigravity Suite)
         run: |
           mkdir -p "$HOME/.config/opencode"
-
-          cat > "$GITHUB_WORKSPACE/opencode.json" <<'EOF'
+          cat << 'EOF' > "$HOME/.config/opencode/opencode.json"
           {
             "$schema": "https://opencode.ai/config.json",
-            "model": "zapi/gemini-3.1-pro-high",
+            "plugin": ["opencode-antigravity-auth@beta"],
             "provider": {
               "zapi": {
                 "npm": "@ai-sdk/openai-compatible",
@@ -382,25 +364,117 @@ jobs:
                 },
                 "models": {
                   "gemini-3.1-pro-high": {
-                    "name": "Gemini 3.1 Pro High (ZAPI Thoughts)"
+                    "name": "Gemini 3.1 Pro High (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3.1-pro-low": {
+                    "name": "Gemini 3.1 Pro Low (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3.1-pro-preview": {
+                    "name": "Gemini 3.1 Pro Preview (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-2.5-pro": {
+                    "name": "Gemini 2.5 Pro (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-2.5-flash": {
+                    "name": "Gemini 2.5 Flash (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-2.5-flash-lite": {
+                    "name": "Gemini 2.5 Flash Lite (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3-flash-preview": {
+                    "name": "Gemini 3 Flash Preview (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3-pro-preview": {
+                    "name": "Gemini 3 Pro Preview (ZAPI)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  }
+                }
+              },
+              "google": {
+                "models": {
+                  "antigravity-gemini-3-pro": {
+                    "name": "Gemini 3 Pro (Antigravity)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "low": { "thinkingLevel": "low" },
+                      "high": { "thinkingLevel": "high" }
+                    }
+                  },
+                  "antigravity-gemini-3-flash": {
+                    "name": "Gemini 3 Flash (Antigravity)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "minimal": { "thinkingLevel": "minimal" },
+                      "low": { "thinkingLevel": "low" },
+                      "medium": { "thinkingLevel": "medium" },
+                      "high": { "thinkingLevel": "high" }
+                    }
+                  },
+                  "antigravity-claude-sonnet-4-5": {
+                    "name": "Claude Sonnet 4.5 (no thinking) (Antigravity)",
+                    "limit": { "context": 200000, "output": 64000 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "antigravity-claude-sonnet-4-5-thinking": {
+                    "name": "Claude Sonnet 4.5 Thinking (Antigravity)",
+                    "limit": { "context": 200000, "output": 64000 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+                    }
+                  },
+                  "antigravity-claude-opus-4-5-thinking": {
+                    "name": "Claude Opus 4.5 Thinking (Antigravity)",
+                    "limit": { "context": 200000, "output": 64000 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] },
+                    "variants": {
+                      "low": { "thinkingConfig": { "thinkingBudget": 8192 } },
+                      "max": { "thinkingConfig": { "thinkingBudget": 32768 } }
+                    }
+                  },
+                  "gemini-2.5-flash": {
+                    "name": "Gemini 2.5 Flash (Gemini CLI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-2.5-pro": {
+                    "name": "Gemini 2.5 Pro (Gemini CLI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3-flash-preview": {
+                    "name": "Gemini 3 Flash Preview (Gemini CLI)",
+                    "limit": { "context": 1048576, "output": 65536 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+                  },
+                  "gemini-3-pro-preview": {
+                    "name": "Gemini 3 Pro Preview (Gemini CLI)",
+                    "limit": { "context": 1048576, "output": 65535 },
+                    "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
                   }
                 }
               }
             }
           }
           EOF
-
-          cp "$GITHUB_WORKSPACE/opencode.json" "$HOME/.config/opencode/opencode.json"
-
-          echo "=== Root opencode.json ==="
-          cat "$GITHUB_WORKSPACE/opencode.json"
-
-          echo "=== Home opencode.json ==="
-          cat "$HOME/.config/opencode/opencode.json"
-
-      - name: List configured models
-        run: |
-          opencode models zapi || true
 
       - name: Initial Startup
         run: |
@@ -474,8 +548,6 @@ jobs:
             echo "Tunnel failed to produce a public URL"
             echo "=== openchamber.log ==="
             tail -n 200 openchamber.log || true
-            echo "=== zapi-proxy.log ==="
-            tail -n 200 zapi-proxy.log || true
             echo "=== tunnel.log ==="
             tail -n 200 tunnel.log || true
             exit 1
@@ -512,8 +584,8 @@ jobs:
               sleep 10
             fi
 
-            if ! curl -fsS http://127.0.0.1:4010/healthz >/dev/null 2>&1; then
-              echo "[$(date)] Restoring ZAPI thought injector..."
+            if ! pgrep -f "zapi-thought-proxy.js" >/dev/null 2>&1; then
+              echo "[$(date)] Restoring ZAPI thought proxy..."
               nohup node "$HOME/zapi-thought-proxy.js" >> zapi-proxy.log 2>&1 &
               sleep 3
             fi
