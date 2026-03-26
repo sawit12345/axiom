@@ -201,8 +201,8 @@ jobs:
             "provider": {
               "openai": {
                 "options": {
-                  "baseURL": "https://noobrouterproduction.azurewebsites.net/v1",
-                  "apiKey": "sk-clawd"
+                  "baseURL": "https://wiwi.up.railway.app/v1",
+                  "apiKey": "zenith+wiwi"
                 }
               },
               "evolvex": {
