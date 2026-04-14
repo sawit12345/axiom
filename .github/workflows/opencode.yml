@@ -207,14 +207,14 @@ jobs:
               },
               "evolvex": {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "EvolveX",
+                "name": "Modal",
                 "options": {
-                  "baseURL": "https://api.evolvex.gg/v1",
+                  "baseURL": "https://api.us-west-2.modal.direct/v1",
                   "apiKey": "{env:EVOLVEX_API_KEY}"
                 },
                 "models": {
-                  "claude-opus-4-6": {
-                    "name": "Claude Opus 4.6"
+                  "zai-org/GLM-5.1-FP8": {
+                    "name": "GLM-5.1"
                   }
                 }
               },
