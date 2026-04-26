@@ -201,8 +201,8 @@ jobs:
             "provider": {
               "openai": {
                 "options": {
-                  "baseURL": "https://wiwi.up.railway.app/v1",
-                  "apiKey": "zenith+wiwi"
+                  "baseURL": "https://logfare.ai/v1",
+                  "apiKey": "lfu_GJ8qxCIVVD7Zf2yVfoQTz2HPM6mTERs0"
                 }
               },
               "evolvex": {
