@@ -203,6 +203,7 @@ jobs:
                 "options": {
                   "baseURL": "https://logfare.ai/v1",
                   "apiKey": "lfu_GJ8qxCIVVD7Zf2yVfoQTz2HPM6mTERs0"
+                  "useCompletionUrls": true
                 }
               },
               "evolvex": {
