@@ -201,9 +201,8 @@ jobs:
             "provider": {
               "openai": {
                 "options": {
-                  "baseURL": "https://logfare.ai/v1",
-                  "apiKey": "lfu_GJ8qxCIVVD7Zf2yVfoQTz2HPM6mTERs0",
-                  "useCompletionUrls": true
+                  "baseURL": "https://anyrouter.top/v1",
+                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
                 }
               },
               "evolvex": {
