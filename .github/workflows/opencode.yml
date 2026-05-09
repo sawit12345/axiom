@@ -197,7 +197,7 @@ jobs:
           cat << 'EOF' > "$HOME/.config/opencode/opencode.json"
           {
             "$schema": "https://opencode.ai/config.json",
-            "plugin": ["opencode-antigravity-auth@beta", "opencode-ralph-loop"],
+            "plugin": ["opencode-antigravity-auth@beta", "oh-my-openagent"],
             "provider": {
               "openai": {
                 "options": {
