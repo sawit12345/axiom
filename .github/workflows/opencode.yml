@@ -79,7 +79,6 @@ jobs:
             find /tmp/opencode-restore -type f 2>/dev/null || echo "No files found"
 
             mkdir -p "$HOME/.config/opencode" \
-                     "$HOME/.config/opencode/plugins" \
                      "$HOME/.local/share/opencode/project" \
                      "$HOME/.local/state/opencode" \
                      "$HOME/.config/openchamber" \
@@ -87,15 +86,7 @@ jobs:
                      "$HOME/.local/share/opencode/worktree" \
                      "$HOME/.local/share/opencode/bin" \
                      "$HOME/.local/share/opencode/log" \
-                     "$HOME/.cache/opencode" \
-                     "$HOME/.config/oh-my-openagent" \
-                     "$HOME/.config/oh-my-opencode" \
-                     "$HOME/.local/share/oh-my-openagent" \
-                     "$HOME/.local/share/oh-my-opencode" \
-                     "$HOME/.cache/oh-my-openagent" \
-                     "$HOME/.cache/oh-my-opencode" \
-                     "$HOME/.oh-my-openagent" \
-                     "$HOME/.oh-my-opencode"
+                     "$HOME/.cache/opencode"
 
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring OpenCode config files..."
@@ -161,63 +152,69 @@ jobs:
               cp -rv /tmp/opencode-restore/storage/* "$HOME/.local/share/opencode/storage/" 2>/dev/null || true
             fi
 
-            # Restore Oh My OpenAgent / legacy Oh My OpenCode files explicitly.
-            # These are separate from OpenCode's own config/cache in some installs.
-            if [ -d "/tmp/opencode-restore/omo/config-opencode" ]; then
-              echo "Restoring OmO config files under ~/.config/opencode..."
-              cp -rv /tmp/opencode-restore/omo/config-opencode/* "$HOME/.config/opencode/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/config-oh-my-openagent" ]; then
-              echo "Restoring ~/.config/oh-my-openagent..."
-              cp -rv /tmp/opencode-restore/omo/config-oh-my-openagent/* "$HOME/.config/oh-my-openagent/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/config-oh-my-opencode" ]; then
-              echo "Restoring ~/.config/oh-my-opencode..."
-              cp -rv /tmp/opencode-restore/omo/config-oh-my-opencode/* "$HOME/.config/oh-my-opencode/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/local-share-oh-my-openagent" ]; then
-              echo "Restoring ~/.local/share/oh-my-openagent..."
-              cp -rv /tmp/opencode-restore/omo/local-share-oh-my-openagent/* "$HOME/.local/share/oh-my-openagent/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/local-share-oh-my-opencode" ]; then
-              echo "Restoring ~/.local/share/oh-my-opencode..."
-              cp -rv /tmp/opencode-restore/omo/local-share-oh-my-opencode/* "$HOME/.local/share/oh-my-opencode/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/cache-oh-my-openagent" ]; then
-              echo "Restoring ~/.cache/oh-my-openagent..."
-              cp -rv /tmp/opencode-restore/omo/cache-oh-my-openagent/* "$HOME/.cache/oh-my-openagent/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/cache-oh-my-opencode" ]; then
-              echo "Restoring ~/.cache/oh-my-opencode..."
-              cp -rv /tmp/opencode-restore/omo/cache-oh-my-opencode/* "$HOME/.cache/oh-my-opencode/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/manual-oh-my-openagent" ]; then
-              echo "Restoring ~/.oh-my-openagent..."
-              cp -rv /tmp/opencode-restore/omo/manual-oh-my-openagent/* "$HOME/.oh-my-openagent/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/manual-oh-my-opencode" ]; then
-              echo "Restoring ~/.oh-my-opencode..."
-              cp -rv /tmp/opencode-restore/omo/manual-oh-my-opencode/* "$HOME/.oh-my-opencode/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/cache-opencode-node-modules" ]; then
-              echo "Restoring cached OmO npm packages under ~/.cache/opencode/node_modules..."
-              mkdir -p "$HOME/.cache/opencode/node_modules"
-              cp -rv /tmp/opencode-restore/omo/cache-opencode-node-modules/* "$HOME/.cache/opencode/node_modules/" 2>/dev/null || true
-            fi
-            if [ -d "/tmp/opencode-restore/omo/bin-node-modules" ]; then
-              echo "Restoring OmO packages under ~/.local/share/opencode/bin/node_modules..."
-              mkdir -p "$HOME/.local/share/opencode/bin/node_modules"
-              cp -rv /tmp/opencode-restore/omo/bin-node-modules/* "$HOME/.local/share/opencode/bin/node_modules/" 2>/dev/null || true
-            fi
-            if [ -f "/tmp/opencode-restore/omo/repo-opencode/oh-my-openagent-configs.tar.gz" ] && [ -d "$HOME/repos" ]; then
-              echo "Restoring repo-level .opencode Oh My OpenAgent/OpenCode configs..."
-              tar -xzf /tmp/opencode-restore/omo/repo-opencode/oh-my-openagent-configs.tar.gz -C "$HOME/repos" 2>/dev/null || true
-            fi
-
             echo "Session restored successfully!"
           else
             echo "No previous session found. Fresh start."
           fi
+
+
+      - name: Restore Oh My OpenAgent Data
+        run: |
+          set -euo pipefail
+          echo "Restoring Oh My OpenAgent / Oh My OpenCode data..."
+
+          mkdir -p "$HOME/.config/opencode" \
+                   "$HOME/.config/oh-my-openagent" \
+                   "$HOME/.config/oh-my-opencode" \
+                   "$HOME/.local/share/oh-my-openagent" \
+                   "$HOME/.local/share/oh-my-opencode" \
+                   "$HOME/.cache/oh-my-openagent" \
+                   "$HOME/.cache/oh-my-opencode" \
+                   "$HOME/.oh-my-openagent" \
+                   "$HOME/.oh-my-opencode"
+
+          if [ -d "/tmp/opencode-restore/opencode-omo-config" ]; then
+            echo "Restoring OmO config files inside ~/.config/opencode..."
+            cp -rv /tmp/opencode-restore/opencode-omo-config/* "$HOME/.config/opencode/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-config-openagent" ]; then
+            cp -rv /tmp/opencode-restore/omo-config-openagent/* "$HOME/.config/oh-my-openagent/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-config-opencode" ]; then
+            cp -rv /tmp/opencode-restore/omo-config-opencode/* "$HOME/.config/oh-my-opencode/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-share-openagent" ]; then
+            cp -rv /tmp/opencode-restore/omo-share-openagent/* "$HOME/.local/share/oh-my-openagent/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-share-opencode" ]; then
+            cp -rv /tmp/opencode-restore/omo-share-opencode/* "$HOME/.local/share/oh-my-opencode/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-cache-openagent" ]; then
+            cp -rv /tmp/opencode-restore/omo-cache-openagent/* "$HOME/.cache/oh-my-openagent/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-cache-opencode" ]; then
+            cp -rv /tmp/opencode-restore/omo-cache-opencode/* "$HOME/.cache/oh-my-opencode/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-home-openagent" ]; then
+            cp -rv /tmp/opencode-restore/omo-home-openagent/* "$HOME/.oh-my-openagent/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/omo-home-opencode" ]; then
+            cp -rv /tmp/opencode-restore/omo-home-opencode/* "$HOME/.oh-my-opencode/" 2>/dev/null || true
+          fi
+
+          if [ -d "/tmp/opencode-restore/repo-omo-configs" ]; then
+            echo "Restoring repo-level .opencode/oh-my-* config files..."
+            (cd /tmp/opencode-restore/repo-omo-configs && tar -cf - .) | (cd "$HOME/repos" && tar -xf -) 2>/dev/null || true
+          fi
+
 
       # ============================================================
       # CACHE: Speed up npm installations
@@ -265,6 +262,9 @@ jobs:
                 "options": {
                   "baseURL": "https://anyrouter.top/v1",
                   "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
+                  "store": true,
+                  "include": [],
+                  "reasoningSummary": "detailed"
                 }
               },
               "evolvex": {
@@ -351,182 +351,238 @@ jobs:
           }
           EOF
 
-          # Runtime guard: OpenCode loads npm plugins from config before global plugin files,
-          # so this local plugin runs after Oh My OpenAgent has registered its agents.
-          # It strips model/temperature pins from the final live agent config, including
-          # built-in OmO agents and subagents with hardcoded defaults.
-          mkdir -p "$HOME/.config/opencode/plugins"
-          cat << 'EOF' > "$HOME/.config/opencode/plugins/zz-omo-strip-model-temperature.js"
-          export const OmoStripModelTemperature = async () => {
-            const STRIP_KEYS = new Set(["model", "temperature", "fallback_models", "fallbackModels"]);
 
-            function scrub(value) {
-              let removed = 0;
-              if (!value || typeof value !== "object") return removed;
-              if (Array.isArray(value)) {
-                for (const item of value) removed += scrub(item);
-                return removed;
-              }
-              for (const key of Object.keys(value)) {
-                if (STRIP_KEYS.has(key)) {
-                  delete value[key];
-                  removed += 1;
-                } else {
-                  removed += scrub(value[key]);
-                }
-              }
-              return removed;
-            }
+      - name: Normalize OpenCode Reasoning Persistence
+        run: |
+          set -euo pipefail
+          echo "Using OpenCode/OpenAI stateful response storage: store=true, no reasoning.encrypted_content replay."
+          echo "This does not change providers, base URLs, API keys, selected model, sessions, project data, or reasoning summaries."
 
-            return {
-              config: async (cfg) => {
-                let removed = 0;
-                removed += scrub(cfg?.agent);
-                removed += scrub(cfg?.agents);
-                removed += scrub(cfg?.subagent);
-                removed += scrub(cfg?.subagents);
-                removed += scrub(cfg?.categories);
-                removed += scrub(cfg?.category);
-                removed += scrub(cfg?.["oh-my-openagent"]);
-                removed += scrub(cfg?.["oh-my-opencode"]);
-                removed += scrub(cfg?.ohMyOpenAgent);
-                removed += scrub(cfg?.ohMyOpencode);
-                if (removed > 0) {
-                  console.log(`[omo-strip] removed ${removed} model/temperature/fallback override(s) from runtime agent config`);
-                }
-              },
-            };
-          };
-          EOF
-
-          # File-level guard: scrub restored/local Oh My OpenAgent/OpenCode config files on
-          # this runner. This covers user config, project .opencode config, and legacy names.
-          python3 << 'PY'
-          import json
+          python3 <<'PY'
+          from pathlib import Path
           import os
           import re
-          from pathlib import Path
 
-          HOME = Path.home()
-          STRIP_KEYS = {"model", "temperature", "fallback_models", "fallbackModels"}
-          TARGET_BASENAMES = {
-              "oh-my-openagent.json", "oh-my-openagent.jsonc",
-              "oh-my-opencode.json", "oh-my-opencode.jsonc",
-          }
-          SKIP_DIRS = {".git", "node_modules", ".next", "dist", "build", "vendor"}
+          home = Path(os.environ["HOME"])
 
-          def strip_jsonc(text: str) -> str:
-              out = []
-              i = 0
-              in_str = False
-              quote = ""
-              esc = False
-              while i < len(text):
-                  c = text[i]
-                  n = text[i + 1] if i + 1 < len(text) else ""
-                  if in_str:
-                      out.append(c)
-                      if esc:
-                          esc = False
-                      elif c == "\\":
-                          esc = True
-                      elif c == quote:
-                          in_str = False
-                      i += 1
-                      continue
-                  if c in ('"', "'"):
-                      in_str = True
-                      quote = c
-                      out.append(c)
-                      i += 1
-                      continue
-                  if c == "/" and n == "/":
-                      i += 2
-                      while i < len(text) and text[i] not in "\r\n":
-                          i += 1
-                      continue
-                  if c == "/" and n == "*":
-                      i += 2
-                      while i + 1 < len(text) and not (text[i] == "*" and text[i + 1] == "/"):
-                          i += 1
-                      i += 2
-                      continue
-                  out.append(c)
-                  i += 1
-              cleaned = "".join(out)
-              cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
-              return cleaned
+          # Only touch OpenCode config files, never session/project databases.
+          candidates = [home / ".config/opencode/opencode.json", home / ".config/opencode/opencode.jsonc"]
+          repos = home / "repos"
+          if repos.exists():
+              for pat in ("**/opencode.json", "**/opencode.jsonc", "**/.opencode/opencode.json", "**/.opencode/opencode.jsonc"):
+                  candidates.extend(repos.glob(pat))
 
-          def scrub(value):
-              removed = 0
-              if isinstance(value, dict):
-                  for key in list(value.keys()):
-                      if key in STRIP_KEYS:
-                          del value[key]
-                          removed += 1
-                      else:
-                          removed += scrub(value[key])
-              elif isinstance(value, list):
-                  for item in value:
-                      removed += scrub(item)
-              return removed
-
-          def candidate_files():
-              seen = set()
-              roots = [
-                  HOME / ".config" / "opencode",
-                  HOME / ".config" / "oh-my-openagent",
-                  HOME / ".config" / "oh-my-opencode",
-                  HOME / ".local" / "share" / "oh-my-openagent",
-                  HOME / ".local" / "share" / "oh-my-opencode",
-                  HOME / ".oh-my-openagent",
-                  HOME / ".oh-my-opencode",
-              ]
-              for root in roots:
-                  if not root.exists():
-                      continue
-                  for path in root.rglob("*"):
-                      if path.is_file() and (path.name in TARGET_BASENAMES or path.suffix in {".json", ".jsonc"}):
-                          if path not in seen:
-                              seen.add(path)
-                              yield path
-              repos = HOME / "repos"
-              if repos.exists():
-                  for dirpath, dirnames, filenames in os.walk(repos):
-                      dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-                      if Path(dirpath).name != ".opencode":
-                          continue
-                      for filename in filenames:
-                          if filename in TARGET_BASENAMES:
-                              path = Path(dirpath) / filename
-                              if path not in seen:
-                                  seen.add(path)
-                                  yield path
-
-          changed_files = 0
-          removed_total = 0
-          for path in candidate_files():
+          def normalize(path: Path) -> None:
               try:
-                  raw = path.read_text(encoding="utf-8")
-                  data = json.loads(strip_jsonc(raw))
-              except Exception as exc:
-                  print(f"[omo-strip] skipped unparsable config: {path} ({exc})")
-                  continue
-              removed = scrub(data)
-              if removed:
-                  path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-                  changed_files += 1
-                  removed_total += removed
-                  print(f"[omo-strip] scrubbed {removed} override(s): {path}")
+                  s = path.read_text(encoding="utf-8")
+              except Exception:
+                  return
+              original = s
 
-          fallback = HOME / ".config" / "opencode" / "oh-my-openagent.json"
-          has_user_config = any((HOME / ".config" / "opencode" / name).exists() for name in TARGET_BASENAMES)
-          if not has_user_config:
-              fallback.write_text(json.dumps({"agents": {}, "categories": {}}, indent=2) + "\n", encoding="utf-8")
-              print(f"[omo-strip] wrote minimal local OmO config without remote schema: {fallback}")
+              # OpenCode docs expose reasoningSummary/include as model/provider options.
+              # The encrypted-content failure happens when stale reasoning.encrypted_content
+              # is replayed; keep readable summaries, but do not request/replay encrypted blobs.
+              s = re.sub(r'"store"\s*:\s*false', '"store": true', s)
+              s = re.sub(
+                  r'"include"\s*:\s*\[[^\]]*"reasoning\.encrypted_content"[^\]]*\]\s*,?',
+                  '"include": [],',
+                  s,
+                  flags=re.S,
+              )
 
-          print(f"[omo-strip] file pass complete: {changed_files} file(s), {removed_total} override(s) removed")
+              # If this is the generated global config and the openai options block somehow
+              # lost the stateful options, add them after apiKey without touching baseURL/key.
+              if path == home / ".config/opencode/opencode.json":
+                  if '"store"' not in s:
+                      s = re.sub(r'("apiKey"\s*:\s*"[^"\n]*")\s*,?', r'\1,\n                  "store": true', s, count=1)
+                  if '"include"' not in s:
+                      s = re.sub(r'("store"\s*:\s*true)\s*,?', r'\1,\n                  "include": []', s, count=1)
+                  if '"reasoningSummary"' not in s:
+                      s = re.sub(r'("include"\s*:\s*\[\])\s*,?', r'\1,\n                  "reasoningSummary": "detailed"', s, count=1)
+
+              # Clean comma before braces/brackets if regex edits left one.
+              s = re.sub(r',([ \t\r\n]*[}\]])', r'\1', s)
+              if s != original:
+                  path.write_text(s, encoding="utf-8")
+                  print(f"normalized reasoning persistence: {path}")
+
+          for p in sorted(set(candidates)):
+              if p.exists() and p.is_file():
+                  normalize(p)
           PY
+
+
+      - name: Normalize OmO/OpenCode Agent Model Overrides
+        run: |
+          set -euo pipefail
+          echo "Normalizing agent/subagent model settings without changing providers, base URLs, API keys, or OpenCode's selected default model..."
+
+          mkdir -p "$HOME/.config/opencode"
+
+          cat > "$HOME/.config/opencode/oh-my-openagent.jsonc" <<'EOF'
+          {
+            "model_capabilities": {
+              "enabled": false,
+              "auto_refresh_on_start": false
+            },
+            "disabled_hooks": [
+              "model-fallback",
+              "runtime-fallback"
+            ],
+            "agents": {
+              "sisyphus": {},
+              "hephaestus": {},
+              "prometheus": {},
+              "oracle": {},
+              "librarian": {},
+              "explore": {},
+              "multimodal-looker": {},
+              "metis": {},
+              "momus": {},
+              "atlas": {},
+              "sisyphus-junior": {}
+            },
+            "categories": {}
+          }
+          EOF
+
+          # During the rename transition OmO still recognizes both basenames, and
+          # legacy oh-my-opencode.* can win if both exist. Keep both identical.
+          cp "$HOME/.config/opencode/oh-my-openagent.jsonc" "$HOME/.config/opencode/oh-my-opencode.jsonc"
+
+          python3 <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          home = Path(os.environ["HOME"])
+
+          bad_keys = {
+              "$schema",
+              "model",
+              "fallback_models",
+              "fallbackModels",
+              "temperature",
+              "top_p",
+              "topP",
+          }
+
+          # Remove direct model/temperature fields from JSON/JSONC OmO files.
+          # This intentionally does not touch ~/.config/opencode/opencode.json provider blocks.
+          jsonc_field_patterns = [
+              re.compile(
+                  r'(?ms)^[ \t]*"' + re.escape(key) + r'"[ \t]*:[ \t]*(?:"(?:\\.|[^"\\])*"|\[[\s\S]*?\]|\{[\s\S]*?\}|-?\d+(?:\.\d+)?|true|false|null)[ \t]*,?[ \t]*(?:\r?\n|$)'
+              )
+              for key in bad_keys
+          ]
+
+          yaml_line_re = re.compile(
+              r'(?m)^[ \t]*(?:model|fallback_models|fallbackModels|temperature|top_p|topP)[ \t]*:[^\n]*(?:\n|$)'
+          )
+
+          def strip_jsonc(path: Path) -> None:
+              try:
+                  s = path.read_text(encoding="utf-8")
+              except Exception:
+                  return
+              original = s
+              for pat in jsonc_field_patterns:
+                  s = pat.sub("", s)
+              # Clean simple dangling commas before closing braces/brackets.
+              s = re.sub(r',([ \t\r\n]*[}\]])', r'\1', s)
+              if s != original:
+                  path.write_text(s, encoding="utf-8")
+                  print(f"stripped OmO JSONC fields: {path}")
+
+          def strip_yaml_like(path: Path) -> None:
+              try:
+                  s = path.read_text(encoding="utf-8")
+              except Exception:
+                  return
+              original = s
+              s = yaml_line_re.sub("", s)
+              if s != original:
+                  path.write_text(s, encoding="utf-8")
+                  print(f"stripped YAML fields: {path}")
+
+          def strip_md_frontmatter(path: Path) -> None:
+              try:
+                  s = path.read_text(encoding="utf-8")
+              except Exception:
+                  return
+              if not s.startswith("---"):
+                  return
+              end = s.find("\n---", 3)
+              if end == -1:
+                  return
+              front = s[:end + 4]
+              body = s[end + 4:]
+              new_front = yaml_line_re.sub("", front)
+              if new_front != front:
+                  path.write_text(new_front + body, encoding="utf-8")
+                  print(f"stripped agent frontmatter fields: {path}")
+
+          omo_files = []
+          candidates = [
+              home / ".config/opencode",
+              home / ".config/oh-my-openagent",
+              home / ".config/oh-my-opencode",
+              home / ".local/share/oh-my-openagent",
+              home / ".local/share/oh-my-opencode",
+              home / ".oh-my-openagent",
+              home / ".oh-my-opencode",
+          ]
+
+          for base in candidates:
+              if not base.exists():
+                  continue
+              for pat in ("oh-my-openagent.json", "oh-my-openagent.jsonc", "oh-my-opencode.json", "oh-my-opencode.jsonc", "*.json", "*.jsonc", "*.yaml", "*.yml"):
+                  omo_files.extend(base.rglob(pat))
+
+          repos = home / "repos"
+          if repos.exists():
+              for pat in (
+                  "**/.opencode/oh-my-openagent.json",
+                  "**/.opencode/oh-my-openagent.jsonc",
+                  "**/.opencode/oh-my-opencode.json",
+                  "**/.opencode/oh-my-opencode.jsonc",
+              ):
+                  omo_files.extend(repos.glob(pat))
+
+          for path in sorted(set(omo_files)):
+              if path.suffix in {".json", ".jsonc"}:
+                  strip_jsonc(path)
+              elif path.suffix in {".yaml", ".yml"}:
+                  strip_yaml_like(path)
+
+          # OpenCode's official agent files are Markdown with YAML frontmatter.
+          # Removing these keys means agents/subagents inherit the primary/default model.
+          agent_dirs = [home / ".config/opencode/agents"]
+          command_dirs = [home / ".config/opencode/commands"]
+          if repos.exists():
+              agent_dirs.extend(repos.glob("**/.opencode/agents"))
+              command_dirs.extend(repos.glob("**/.opencode/commands"))
+
+          for d in agent_dirs + command_dirs:
+              if not d.exists():
+                  continue
+              for md in d.rglob("*.md"):
+                  strip_md_frontmatter(md)
+
+          print("Agent/subagent model override normalization complete.")
+          PY
+
+          echo "Remaining explicit model/temperature keys in OmO/OpenCode agent files, if any:"
+          {
+            find "$HOME/.config/opencode" "$HOME/.config/oh-my-openagent" "$HOME/.config/oh-my-opencode" "$HOME/.local/share/oh-my-openagent" "$HOME/.local/share/oh-my-opencode" "$HOME/.oh-my-openagent" "$HOME/.oh-my-opencode" -type f \( -name 'oh-my-openagent.json' -o -name 'oh-my-openagent.jsonc' -o -name 'oh-my-opencode.json' -o -name 'oh-my-opencode.jsonc' -o -path '*/agents/*.md' -o -path '*/commands/*.md' \) 2>/dev/null
+            find "$HOME/repos" -type f \( -path '*/.opencode/oh-my-openagent.json' -o -path '*/.opencode/oh-my-openagent.jsonc' -o -path '*/.opencode/oh-my-opencode.json' -o -path '*/.opencode/oh-my-opencode.jsonc' -o -path '*/.opencode/agents/*.md' -o -path '*/.opencode/commands/*.md' \) 2>/dev/null
+          } | while IFS= read -r f; do
+            if grep -nE '(^|["[:space:]])(model|fallback_models|fallbackModels|temperature|top_p|topP)(["[:space:]]|:)' "$f" >/dev/null 2>&1; then
+              echo "WARN: still has model/temperature-like key: $f"
+              grep -nE '(^|["[:space:]])(model|fallback_models|fallbackModels|temperature|top_p|topP)(["[:space:]]|:)' "$f" | sed 's/.*//g' || true
+            fi
+          done
+
 
       - name: Initial Startup
         run: |
@@ -671,19 +727,7 @@ jobs:
                    /tmp/opencode-save/storage \
                    /tmp/opencode-save/cache \
                    /tmp/opencode-save/log \
-                   /tmp/opencode-save/bin \
-                   /tmp/opencode-save/omo/config-opencode \
-                   /tmp/opencode-save/omo/config-oh-my-openagent \
-                   /tmp/opencode-save/omo/config-oh-my-opencode \
-                   /tmp/opencode-save/omo/local-share-oh-my-openagent \
-                   /tmp/opencode-save/omo/local-share-oh-my-opencode \
-                   /tmp/opencode-save/omo/cache-oh-my-openagent \
-                   /tmp/opencode-save/omo/cache-oh-my-opencode \
-                   /tmp/opencode-save/omo/cache-opencode-node-modules \
-                   /tmp/opencode-save/omo/bin-node-modules \
-                   /tmp/opencode-save/omo/manual-oh-my-openagent \
-                   /tmp/opencode-save/omo/manual-oh-my-opencode \
-                   /tmp/opencode-save/omo/repo-opencode
+                   /tmp/opencode-save/bin
 
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
@@ -753,56 +797,6 @@ jobs:
             echo "Bin directory saved: $(find "$HOME/.local/share/opencode/bin" -type f 2>/dev/null | wc -l) files"
           fi
 
-          echo "Saving Oh My OpenAgent / legacy Oh My OpenCode files explicitly..."
-          cp -v "$HOME/.config/opencode/oh-my-openagent."* /tmp/opencode-save/omo/config-opencode/ 2>/dev/null || true
-          cp -v "$HOME/.config/opencode/oh-my-opencode."* /tmp/opencode-save/omo/config-opencode/ 2>/dev/null || true
-          if [ -d "$HOME/.config/opencode/plugins" ]; then
-            find "$HOME/.config/opencode/plugins" -maxdepth 1 -type f \( -iname '*omo*' -o -iname '*openagent*' -o -iname '*opencode*' \) -exec cp -v {} /tmp/opencode-save/omo/config-opencode/ \; 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.config/oh-my-openagent" ] && [ "$(ls -A "$HOME/.config/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.config/oh-my-openagent/"* /tmp/opencode-save/omo/config-oh-my-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.config/oh-my-opencode" ] && [ "$(ls -A "$HOME/.config/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.config/oh-my-opencode/"* /tmp/opencode-save/omo/config-oh-my-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/oh-my-openagent" ] && [ "$(ls -A "$HOME/.local/share/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.local/share/oh-my-openagent/"* /tmp/opencode-save/omo/local-share-oh-my-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/oh-my-opencode" ] && [ "$(ls -A "$HOME/.local/share/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.local/share/oh-my-opencode/"* /tmp/opencode-save/omo/local-share-oh-my-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/oh-my-openagent" ] && [ "$(ls -A "$HOME/.cache/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.cache/oh-my-openagent/"* /tmp/opencode-save/omo/cache-oh-my-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/oh-my-opencode" ] && [ "$(ls -A "$HOME/.cache/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.cache/oh-my-opencode/"* /tmp/opencode-save/omo/cache-oh-my-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/opencode/node_modules/oh-my-openagent" ]; then
-            cp -rv "$HOME/.cache/opencode/node_modules/oh-my-openagent" /tmp/opencode-save/omo/cache-opencode-node-modules/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/opencode/node_modules/oh-my-opencode" ]; then
-            cp -rv "$HOME/.cache/opencode/node_modules/oh-my-opencode" /tmp/opencode-save/omo/cache-opencode-node-modules/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/opencode/bin/node_modules/oh-my-openagent" ]; then
-            cp -rv "$HOME/.local/share/opencode/bin/node_modules/oh-my-openagent" /tmp/opencode-save/omo/bin-node-modules/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/opencode/bin/node_modules/oh-my-opencode" ]; then
-            cp -rv "$HOME/.local/share/opencode/bin/node_modules/oh-my-opencode" /tmp/opencode-save/omo/bin-node-modules/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.oh-my-openagent" ] && [ "$(ls -A "$HOME/.oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.oh-my-openagent/"* /tmp/opencode-save/omo/manual-oh-my-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.oh-my-opencode" ] && [ "$(ls -A "$HOME/.oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.oh-my-opencode/"* /tmp/opencode-save/omo/manual-oh-my-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/repos" ]; then
-            (
-              cd "$HOME/repos" &&
-              find . -type f \(                 -path '*/.opencode/oh-my-openagent.json' -o                 -path '*/.opencode/oh-my-openagent.jsonc' -o                 -path '*/.opencode/oh-my-opencode.json' -o                 -path '*/.opencode/oh-my-opencode.jsonc'               \) -print0 | tar --null -czf /tmp/opencode-save/omo/repo-opencode/oh-my-openagent-configs.tar.gz --files-from - 2>/dev/null || true
-            )
-          fi
-          echo "OmO saved files: $(find /tmp/opencode-save/omo -type f 2>/dev/null | wc -l)"
-
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
             echo "Session data prepared successfully: $(find /tmp/opencode-save -type f | wc -l) files total"
             ls -la /tmp/opencode-save/
@@ -810,6 +804,56 @@ jobs:
             echo "No session data to save - creating placeholder"
             echo "$(date): No session data available" > /tmp/opencode-save/placeholder.txt
           fi
+
+
+      - name: Save Oh My OpenAgent Data
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "Saving Oh My OpenAgent / Oh My OpenCode data..."
+
+          mkdir -p /tmp/opencode-save/opencode-omo-config \
+                   /tmp/opencode-save/omo-config-openagent \
+                   /tmp/opencode-save/omo-config-opencode \
+                   /tmp/opencode-save/omo-share-openagent \
+                   /tmp/opencode-save/omo-share-opencode \
+                   /tmp/opencode-save/omo-cache-openagent \
+                   /tmp/opencode-save/omo-cache-opencode \
+                   /tmp/opencode-save/omo-home-openagent \
+                   /tmp/opencode-save/omo-home-opencode \
+                   /tmp/opencode-save/repo-omo-configs
+
+          find "$HOME/.config/opencode" -maxdepth 1 -type f \( \
+            -name 'oh-my-openagent.json' -o \
+            -name 'oh-my-openagent.jsonc' -o \
+            -name 'oh-my-opencode.json' -o \
+            -name 'oh-my-opencode.jsonc' \
+          \) -exec cp -v {} /tmp/opencode-save/opencode-omo-config/ \; 2>/dev/null || true
+
+          [ -d "$HOME/.config/oh-my-openagent" ] && cp -rv "$HOME/.config/oh-my-openagent/"* /tmp/opencode-save/omo-config-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.config/oh-my-opencode" ] && cp -rv "$HOME/.config/oh-my-opencode/"* /tmp/opencode-save/omo-config-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.local/share/oh-my-openagent" ] && cp -rv "$HOME/.local/share/oh-my-openagent/"* /tmp/opencode-save/omo-share-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.local/share/oh-my-opencode" ] && cp -rv "$HOME/.local/share/oh-my-opencode/"* /tmp/opencode-save/omo-share-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.cache/oh-my-openagent" ] && cp -rv "$HOME/.cache/oh-my-openagent/"* /tmp/opencode-save/omo-cache-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.cache/oh-my-opencode" ] && cp -rv "$HOME/.cache/oh-my-opencode/"* /tmp/opencode-save/omo-cache-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.oh-my-openagent" ] && cp -rv "$HOME/.oh-my-openagent/"* /tmp/opencode-save/omo-home-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.oh-my-opencode" ] && cp -rv "$HOME/.oh-my-opencode/"* /tmp/opencode-save/omo-home-opencode/ 2>/dev/null || true
+
+          if [ -d "$HOME/repos" ]; then
+            while IFS= read -r f; do
+              rel="${f#$HOME/repos/}"
+              mkdir -p "/tmp/opencode-save/repo-omo-configs/$(dirname "$rel")"
+              cp -v "$f" "/tmp/opencode-save/repo-omo-configs/$rel"
+            done < <(find "$HOME/repos" -type f \( \
+              -path '*/.opencode/oh-my-openagent.json' -o \
+              -path '*/.opencode/oh-my-openagent.jsonc' -o \
+              -path '*/.opencode/oh-my-opencode.json' -o \
+              -path '*/.opencode/oh-my-opencode.jsonc' \
+            \) 2>/dev/null || true)
+          fi
+
+          echo "OmO data saved: $(find /tmp/opencode-save -path '*/omo-*' -o -path '*/opencode-omo-config/*' -o -path '*/repo-omo-configs/*' 2>/dev/null | wc -l) paths"
+
 
       - name: Upload Session Data (Artifact)
         if: always()
