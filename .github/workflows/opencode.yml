@@ -16,6 +16,11 @@ on:
         required: true
         default: "300"
         type: string
+      omo_agent_model:
+        description: "Model forced for all Oh My OpenAgent agents/subagents"
+        required: true
+        default: "openai/gpt-5.5"
+        type: string
 
 permissions:
   actions: write
@@ -26,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EVOLVEX_API_KEY: ${{ secrets.EVOLVEX_API_KEY }}
+      OMO_AGENT_MODEL: ${{ github.event.inputs.omo_agent_model }}
 
     steps:
       - name: Checkout repo
@@ -83,14 +89,14 @@ jobs:
                      "$HOME/.local/state/opencode" \
                      "$HOME/.config/openchamber" \
                      "$HOME/.config/opencode-worktree" \
-                     "$HOME/.config/oh-my-openagent" \
-                     "$HOME/.config/oh-my-opencode" \
-                     "$HOME/.local/share/oh-my-openagent" \
-                     "$HOME/.local/share/oh-my-opencode" \
                      "$HOME/.local/share/opencode/worktree" \
                      "$HOME/.local/share/opencode/bin" \
                      "$HOME/.local/share/opencode/log" \
                      "$HOME/.cache/opencode" \
+                     "$HOME/.config/oh-my-openagent" \
+                     "$HOME/.config/oh-my-opencode" \
+                     "$HOME/.local/share/oh-my-openagent" \
+                     "$HOME/.local/share/oh-my-opencode" \
                      "$HOME/.cache/oh-my-openagent" \
                      "$HOME/.cache/oh-my-opencode" \
                      "$HOME/.oh-my-openagent" \
@@ -110,6 +116,24 @@ jobs:
               echo "Restoring Worktree config files..."
               cp -rv /tmp/opencode-restore/opencode-worktree/* "$HOME/.config/opencode-worktree/" 2>/dev/null || true
             fi
+
+            for pair in \
+              "omo-config-openagent:$HOME/.config/oh-my-openagent" \
+              "omo-config-opencode:$HOME/.config/oh-my-opencode" \
+              "omo-share-openagent:$HOME/.local/share/oh-my-openagent" \
+              "omo-share-opencode:$HOME/.local/share/oh-my-opencode" \
+              "omo-cache-openagent:$HOME/.cache/oh-my-openagent" \
+              "omo-cache-opencode:$HOME/.cache/oh-my-opencode" \
+              "omo-home-openagent:$HOME/.oh-my-openagent" \
+              "omo-home-opencode:$HOME/.oh-my-opencode"; do
+              name="${pair%%:*}"
+              dest="${pair#*:}"
+              if [ -d "/tmp/opencode-restore/$name" ]; then
+                echo "Restoring $name..."
+                mkdir -p "$dest"
+                cp -rv "/tmp/opencode-restore/$name/"* "$dest/" 2>/dev/null || true
+              fi
+            done
 
             if [ -f "/tmp/opencode-restore/auth.json" ]; then
               echo "Restoring auth.json..."
@@ -160,51 +184,6 @@ jobs:
               cp -rv /tmp/opencode-restore/storage/* "$HOME/.local/share/opencode/storage/" 2>/dev/null || true
             fi
 
-            if [ -d "/tmp/opencode-restore/omo-config-openagent" ]; then
-              echo "Restoring Oh My OpenAgent config..."
-              cp -rv /tmp/opencode-restore/omo-config-openagent/* "$HOME/.config/oh-my-openagent/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-config-opencode" ]; then
-              echo "Restoring Oh My OpenCode config..."
-              cp -rv /tmp/opencode-restore/omo-config-opencode/* "$HOME/.config/oh-my-opencode/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-share-openagent" ]; then
-              echo "Restoring Oh My OpenAgent share data..."
-              cp -rv /tmp/opencode-restore/omo-share-openagent/* "$HOME/.local/share/oh-my-openagent/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-share-opencode" ]; then
-              echo "Restoring Oh My OpenCode share data..."
-              cp -rv /tmp/opencode-restore/omo-share-opencode/* "$HOME/.local/share/oh-my-opencode/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-cache-openagent" ]; then
-              echo "Restoring Oh My OpenAgent cache..."
-              cp -rv /tmp/opencode-restore/omo-cache-openagent/* "$HOME/.cache/oh-my-openagent/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-cache-opencode" ]; then
-              echo "Restoring Oh My OpenCode cache..."
-              cp -rv /tmp/opencode-restore/omo-cache-opencode/* "$HOME/.cache/oh-my-opencode/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-home-openagent" ]; then
-              echo "Restoring ~/.oh-my-openagent..."
-              cp -rv /tmp/opencode-restore/omo-home-openagent/* "$HOME/.oh-my-openagent/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/omo-home-opencode" ]; then
-              echo "Restoring ~/.oh-my-opencode..."
-              cp -rv /tmp/opencode-restore/omo-home-opencode/* "$HOME/.oh-my-opencode/" 2>/dev/null || true
-            fi
-
-            if [ -d "/tmp/opencode-restore/repo-omo-configs" ] && [ -d "$HOME/repos" ]; then
-              echo "Restoring repo-level OmO config files..."
-              (cd /tmp/opencode-restore/repo-omo-configs && tar cf - .) | (cd "$HOME/repos" && tar xvf -) 2>/dev/null || true
-            fi
-
             echo "Session restored successfully!"
           else
             echo "No previous session found. Fresh start."
@@ -251,11 +230,27 @@ jobs:
           {
             "$schema": "https://opencode.ai/config.json",
             "plugin": ["opencode-antigravity-auth@beta", "oh-my-openagent"],
+            "agent": {
+              "sisyphus": { "model": "${OMO_AGENT_MODEL}" },
+              "hephaestus": { "model": "${OMO_AGENT_MODEL}" },
+              "prometheus": { "model": "${OMO_AGENT_MODEL}" },
+              "oracle": { "model": "${OMO_AGENT_MODEL}" },
+              "librarian": { "model": "${OMO_AGENT_MODEL}" },
+              "explore": { "model": "${OMO_AGENT_MODEL}" },
+              "multimodal-looker": { "model": "${OMO_AGENT_MODEL}" },
+              "metis": { "model": "${OMO_AGENT_MODEL}" },
+              "momus": { "model": "${OMO_AGENT_MODEL}" },
+              "atlas": { "model": "${OMO_AGENT_MODEL}" },
+              "sisyphus-junior": { "model": "${OMO_AGENT_MODEL}" }
+            },
             "provider": {
               "openai": {
                 "options": {
                   "baseURL": "https://anyrouter.top/v1",
                   "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
+                  "store": true,
+                  "include": [],
+                  "reasoningSummary": "detailed"
                 }
               },
               "evolvex": {
@@ -342,144 +337,149 @@ jobs:
           }
           EOF
 
-
-      - name: Prepare OmO/OpenCode Agent Override Removal
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.config/opencode"
-
-          # OmO config: no per-agent model/temperature entries, no category model defaults.
-          # Important: empty/omitted is used, not null.
-          cat << 'EOF' > "$HOME/.config/opencode/oh-my-opencode.jsonc"
-          {
-            "agents": {
-              "sisyphus": {},
-              "hephaestus": {},
-              "prometheus": {},
-              "oracle": {},
-              "librarian": {},
-              "explore": {},
-              "multimodal-looker": {},
-              "metis": {},
-              "momus": {},
-              "atlas": {},
-              "sisyphus-junior": {}
-            },
-            "categories": {},
-            "model_fallback": false,
-            "runtime_fallback": false,
-            "disabled_hooks": ["model-fallback", "runtime-fallback"]
-          }
-          EOF
-          cp "$HOME/.config/opencode/oh-my-opencode.jsonc" "$HOME/.config/opencode/oh-my-openagent.jsonc"
-
-          cat > /tmp/strip-omo-agent-overrides.py << 'PY'
-          import os, re, sys
+          python3 - << 'PY'
           from pathlib import Path
-
-          HOME = Path.home()
-          KEYS = r'(?:model|temperature|top_p|topP|fallback_models|fallbackModels|variant)'
-          BAD_MODELS = re.compile(r'(openai/gpt-5\.4-mini-fast|openai/gpt-5\.4-mini|anthropic/claude-opus-4\.7|gpt-5\.4-mini-fast|claude-opus-4\.7)', re.I)
-
-          def is_probably_text(p: Path) -> bool:
-              if p.suffix.lower() in {'.png','.jpg','.jpeg','.gif','.webp','.db','.sqlite','.sqlite3','.lock','.tgz','.gz','.zip'}:
-                  return False
-              try:
-                  b = p.read_bytes()[:4096]
-              except Exception:
-                  return False
-              return b'\0' not in b
-
-          def patch_text(s: str) -> str:
-              before = s
-              # Remove YAML/frontmatter/list-style scalar overrides.
-              s = re.sub(r'(?m)^([ \t-]*)(model|temperature|top_p|topP|fallback_models|fallbackModels|variant):[ \t]*(?:.*)$\n?', '', s)
-              # Remove quoted JSON/JSONC object properties, including simple arrays/objects.
-              for _ in range(8):
-                  ns = re.sub(r'(?s)([{,]\s*)(["\'])(?:model|temperature|top_p|topP|fallback_models|fallbackModels|variant)\2\s*:\s*(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[-+]?[0-9]*\.?[0-9]+|true|false|null|\[[^\[\]]*\]|\{[^{}]*\})\s*,?', r'\1', s)
-                  ns = re.sub(r'(?s)([{,]\s*)(?:model|temperature|top_p|topP|fallback_models|fallbackModels|variant)\s*:\s*(?:"(?:\\.|[^"])*"|\'(?:\\.|[^\'])*\'|[-+]?[0-9]*\.?[0-9]+|true|false|null|\[[^\[\]]*\]|\{[^{}]*\})\s*,?', r'\1', ns)
-                  if ns == s:
-                      break
-                  s = ns
-              # Clean up obvious strict-JSON comma damage.
-              s = re.sub(r',\s*([}\]])', r'\1', s)
-              s = re.sub(r'([\[{])\s*,', r'\1', s)
-              return s
-
-          roots = [
-              HOME/'.config/opencode',
-              HOME/'.config/openchamber',
-              HOME/'.config/oh-my-openagent',
-              HOME/'.config/oh-my-opencode',
-              HOME/'.local/share/opencode',
-              HOME/'.local/share/oh-my-openagent',
-              HOME/'.local/share/oh-my-opencode',
-              HOME/'.cache/opencode',
-              HOME/'.cache/oh-my-openagent',
-              HOME/'.cache/oh-my-opencode',
-              HOME/'.oh-my-openagent',
-              HOME/'.oh-my-opencode',
-              HOME/'repos',
-          ]
-
-          interesting_path = re.compile(r'(oh-my-openagent|oh-my-opencode|opencode[/\\](agents|commands)|\.opencode[/\\](agents|commands|oh-my)|openchamber)', re.I)
-          changed = 0
-          scanned = 0
-          for root in roots:
-              if not root.exists():
-                  continue
-              for p in root.rglob('*'):
-                  if not p.is_file():
-                      continue
-                  ps = str(p)
-                  if not interesting_path.search(ps):
-                      continue
-                  if not is_probably_text(p):
-                      continue
-                  try:
-                      raw = p.read_text(errors='ignore')
-                  except Exception:
-                      continue
-                  scanned += 1
-                  new = patch_text(raw)
-                  if new != raw:
-                      try:
-                          p.write_text(new)
-                          print(f'patched {p}')
-                          changed += 1
-                      except Exception as e:
-                          print(f'could not patch {p}: {e}', file=sys.stderr)
-          print(f'override-strip scanned={scanned} changed={changed}')
+          import os
+          p = Path.home()/'.config/opencode/opencode.json'
+          text = p.read_text()
+          text = text.replace('${OMO_AGENT_MODEL}', os.environ.get('OMO_AGENT_MODEL', 'openai/gpt-5.5'))
+          p.write_text(text)
           PY
 
-          python3 /tmp/strip-omo-agent-overrides.py
+          # Explicit OmO agent/category model override. No temperature/top_p/top_k fields.
+          python3 - << 'PY'
+          from pathlib import Path
+          import json, os
+          model = os.environ.get('OMO_AGENT_MODEL', 'openai/gpt-5.5')
+          agents = [
+            'sisyphus','hephaestus','prometheus','oracle','librarian','explore',
+            'multimodal-looker','metis','momus','atlas','sisyphus-junior'
+          ]
+          categories = [
+            'visual-engineering','ultrabrain','deep','artistry','quick',
+            'unspecified-low','unspecified-high','writing','git'
+          ]
+          cfg = {
+            'agents': {name: {'model': model} for name in agents},
+            'categories': {name: {'model': model} for name in categories},
+            'runtime_fallback': False,
+            'disabled_hooks': ['runtime-fallback'],
+            'model_capabilities': {'enabled': False, 'auto_refresh_on_start': False},
+            'experimental': {'auto_resume': False}
+          }
+          config_dir = Path.home()/'.config/opencode'
+          config_dir.mkdir(parents=True, exist_ok=True)
+          data = json.dumps(cfg, indent=2) + '\n'
+          for name in ['oh-my-opencode.jsonc', 'oh-my-openagent.jsonc']:
+            (config_dir/name).write_text(data)
+          # Project OmO configs can override user OmO config, so pin the workspace and each cloned repo too.
+          project_roots = []
+          ws = os.environ.get('GITHUB_WORKSPACE')
+          if ws:
+            project_roots.append(Path(ws))
+          repos = Path.home()/ 'repos'
+          if repos.exists():
+            project_roots.extend([p for p in repos.iterdir() if p.is_dir()])
+          for root in project_roots:
+            od = root/'.opencode'
+            od.mkdir(exist_ok=True)
+            for name in ['oh-my-opencode.jsonc', 'oh-my-openagent.jsonc']:
+              (od/name).write_text(data)
+          print(f'Pinned OmO agents/categories to {model}; no temperature/top_p/top_k written')
+          PY
+
+          # Remove unsupported sampling params and stale encrypted reasoning blobs from restored state.
+          # Keeps project/session structure and visible summaries.
+          python3 - << 'PY'
+          from pathlib import Path
+          import os, re, sqlite3, shutil, time
+
+          home = Path.home()
+          backup = Path('/tmp/opencode-encrypted-backup') / str(int(time.time()))
+          backup.mkdir(parents=True, exist_ok=True)
+
+          sampling_keys = ['temperature','top_p','topP','top_k','topK']
+          agent_model = os.environ.get('OMO_AGENT_MODEL', 'openai/gpt-5.5')
+          known_agents = {'sisyphus','hephaestus','prometheus','oracle','librarian','explore',
+                          'multimodal-looker','metis','momus','atlas','sisyphus-junior'}
+
+          def scrub_text(text):
+            old = text
+            # Remove unsupported sampling keys from JSON/JSONC/YAML-ish config text.
+            for key in sampling_keys:
+              text = re.sub(r'(?m)^([ \t]*)["\']?' + re.escape(key) + r'["\']?[ \t]*:[^,\n}]+,?[ \t]*\n', '', text)
+              text = re.sub(r'(?s),\s*["\']' + re.escape(key) + r'["\']\s*:\s*(?:"[^"]*"|\d+(?:\.\d+)?|null|true|false|\{.*?\}|\[.*?\])', '', text)
+              text = re.sub(r'(?s)["\']' + re.escape(key) + r'["\']\s*:\s*(?:"[^"]*"|\d+(?:\.\d+)?|null|true|false|\{.*?\}|\[.*?\])\s*,', '', text)
+            # Avoid forwarding old encrypted reasoning through a different router/account. Preserve summary arrays.
+            text = re.sub(r'(?s),\s*"encrypted_content"\s*:\s*"gAAAA[^"]*"', '', text)
+            text = re.sub(r'(?s)"encrypted_content"\s*:\s*"gAAAA[^"]*"\s*,', '', text)
+            text = re.sub(r'(?s),\s*"id"\s*:\s*"rs_[^"]+"', '', text)
+            text = re.sub(r'(?s)"id"\s*:\s*"rs_[^"]+"\s*,', '', text)
+            return text, text != old
+
+          def scrub_file(path):
+            try:
+              data = path.read_bytes()
+              if b'\0' in data[:4096]:
+                return False
+              text = data.decode('utf-8')
+            except Exception:
+              return False
+            new, changed = scrub_text(text)
+            if changed:
+              dst = backup / 'files' / path.relative_to(home).as_posix() if str(path).startswith(str(home)) else backup / 'files' / path.name
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              try: shutil.copy2(path, dst)
+              except Exception: pass
+              path.write_text(new)
+            return changed
+
+          roots = [
+            home/'.config/opencode', home/'.config/openchamber',
+            home/'.local/share/opencode/project', home/'.local/state/opencode',
+            home/'.local/share/opencode/storage', home/'.cache/opencode', home/'repos'
+          ]
+          changed_files = 0
+          for root in roots:
+            if root.exists():
+              for path in root.rglob('*'):
+                if path.is_file() and path.suffix.lower() in {'.json','.jsonc','.yaml','.yml','.md','.txt','.log'}:
+                  changed_files += int(scrub_file(path))
+
+          db = home/'.local/share/opencode/opencode.db'
+          changed_db = 0
+          if db.exists():
+            try:
+              shutil.copy2(db, backup/'opencode.db.before-encrypted-scrub')
+              con = sqlite3.connect(db)
+              cur = con.cursor()
+              tables = [r[0] for r in cur.execute("select name from sqlite_master where type='table'")]
+              for t in tables:
+                cols = cur.execute(f'pragma table_info("{t}")').fetchall()
+                text_cols = [c[1] for c in cols if (c[2] or '').upper() in ('TEXT','JSON','')]
+                pk_cols = [c[1] for c in cols if c[5]]
+                rowid_ok = not pk_cols
+                for col in text_cols:
+                  try:
+                    rows = cur.execute(f'select rowid, "{col}" from "{t}" where "{col}" like ? or "{col}" like ? or "{col}" like ? or "{col}" like ?',
+                                       ('%encrypted_content%','%gAAAA%','%temperature%','%top_p%')).fetchall()
+                  except Exception:
+                    continue
+                  for rowid, val in rows:
+                    if not isinstance(val, str):
+                      continue
+                    new, changed = scrub_text(val)
+                    if changed:
+                      cur.execute(f'update "{t}" set "{col}"=? where rowid=?', (new, rowid))
+                      changed_db += 1
+              con.commit(); con.close()
+            except Exception as e:
+              print('SQLite scrub warning:', e)
+          print(f'scrubbed files={changed_files} sqlite_cells={changed_db}; backup={backup}')
+          PY
 
       - name: Initial Startup
         run: |
-          set -euo pipefail
-
-          echo "Warm-starting OpenChamber once so OpenCode can auto-install configured npm plugins..."
-          : > openchamber.log
-          nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
-          WARM_PID=$!
-          for i in $(seq 1 45); do
-            if lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-              echo "Warm OpenChamber start complete"
-              break
-            fi
-            sleep 2
-          done
-          sleep 8
-          pkill -f "openchamber --port 3000" 2>/dev/null || true
-          wait "$WARM_PID" 2>/dev/null || true
-
-          echo "Patching local cached/generated OmO agent defaults after plugin install..."
-          python3 /tmp/strip-omo-agent-overrides.py || true
-          echo "Known remaining default model strings after patch:"
-          grep -RInE 'gpt-5\.4-mini-fast|claude-opus-4\.7'             "$HOME/.config/opencode" "$HOME/.config/openchamber" "$HOME/.local/share/opencode" "$HOME/.cache/opencode"             2>/dev/null | head -n 50 || true
-
-          echo "Starting final OpenChamber..."
-          : > openchamber.log
           nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
 
           echo "Waiting for OpenChamber to start..."
@@ -630,7 +630,7 @@ jobs:
                    /tmp/opencode-save/omo-cache-opencode \
                    /tmp/opencode-save/omo-home-openagent \
                    /tmp/opencode-save/omo-home-opencode \
-                   /tmp/opencode-save/repo-omo-configs
+                   /tmp/opencode-save/encrypted-backup
 
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
@@ -700,38 +700,27 @@ jobs:
             echo "Bin directory saved: $(find "$HOME/.local/share/opencode/bin" -type f 2>/dev/null | wc -l) files"
           fi
 
-          # Save OmO/OpenAgent-specific files separately too. OpenCode config above already saves
-          # ~/.config/opencode/oh-my-*.jsonc, but these folders can contain OmO state/cache.
-          if [ -d "$HOME/.config/oh-my-openagent" ] && [ "$(ls -A "$HOME/.config/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.config/oh-my-openagent/"* /tmp/opencode-save/omo-config-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.config/oh-my-opencode" ] && [ "$(ls -A "$HOME/.config/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.config/oh-my-opencode/"* /tmp/opencode-save/omo-config-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/oh-my-openagent" ] && [ "$(ls -A "$HOME/.local/share/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.local/share/oh-my-openagent/"* /tmp/opencode-save/omo-share-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.local/share/oh-my-opencode" ] && [ "$(ls -A "$HOME/.local/share/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.local/share/oh-my-opencode/"* /tmp/opencode-save/omo-share-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/oh-my-openagent" ] && [ "$(ls -A "$HOME/.cache/oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.cache/oh-my-openagent/"* /tmp/opencode-save/omo-cache-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.cache/oh-my-opencode" ] && [ "$(ls -A "$HOME/.cache/oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.cache/oh-my-opencode/"* /tmp/opencode-save/omo-cache-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.oh-my-openagent" ] && [ "$(ls -A "$HOME/.oh-my-openagent" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.oh-my-openagent/"* /tmp/opencode-save/omo-home-openagent/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/.oh-my-opencode" ] && [ "$(ls -A "$HOME/.oh-my-opencode" 2>/dev/null)" ]; then
-            cp -rv "$HOME/.oh-my-opencode/"* /tmp/opencode-save/omo-home-opencode/ 2>/dev/null || true
-          fi
-          if [ -d "$HOME/repos" ]; then
-            while IFS= read -r -d '' f; do
-              rel="${f#$HOME/repos/}"
-              mkdir -p "/tmp/opencode-save/repo-omo-configs/$(dirname "$rel")"
-              cp -v "$f" "/tmp/opencode-save/repo-omo-configs/$rel" 2>/dev/null || true
-            done < <(find "$HOME/repos" \( -path '*/.opencode/oh-my-openagent.json*' -o -path '*/.opencode/oh-my-opencode.json*' \) -print0 2>/dev/null)
+          for pair in \
+            "$HOME/.config/oh-my-openagent:/tmp/opencode-save/omo-config-openagent" \
+            "$HOME/.config/oh-my-opencode:/tmp/opencode-save/omo-config-opencode" \
+            "$HOME/.local/share/oh-my-openagent:/tmp/opencode-save/omo-share-openagent" \
+            "$HOME/.local/share/oh-my-opencode:/tmp/opencode-save/omo-share-opencode" \
+            "$HOME/.cache/oh-my-openagent:/tmp/opencode-save/omo-cache-openagent" \
+            "$HOME/.cache/oh-my-opencode:/tmp/opencode-save/omo-cache-opencode" \
+            "$HOME/.oh-my-openagent:/tmp/opencode-save/omo-home-openagent" \
+            "$HOME/.oh-my-opencode:/tmp/opencode-save/omo-home-opencode"; do
+            src="${pair%%:*}"
+            dst="${pair#*:}"
+            if [ -d "$src" ] && [ "$(ls -A "$src" 2>/dev/null)" ]; then
+              mkdir -p "$dst"
+              cp -rv "$src/"* "$dst/" 2>/dev/null || true
+              echo "Saved OmO path $src: $(find "$src" -type f 2>/dev/null | wc -l) files"
+            fi
+          done
+
+          if [ -d /tmp/opencode-encrypted-backup ] && [ "$(find /tmp/opencode-encrypted-backup -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+            cp -rv /tmp/opencode-encrypted-backup/* /tmp/opencode-save/encrypted-backup/ 2>/dev/null || true
+            echo "Encrypted-content scrub backups saved separately"
           fi
 
           if [ "$(find /tmp/opencode-save -type f 2>/dev/null | wc -l)" -gt 0 ]; then
