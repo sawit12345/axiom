@@ -86,7 +86,15 @@ jobs:
                      "$HOME/.local/share/opencode/worktree" \
                      "$HOME/.local/share/opencode/bin" \
                      "$HOME/.local/share/opencode/log" \
-                     "$HOME/.cache/opencode"
+                     "$HOME/.cache/opencode" \
+                     "$HOME/.config/oh-my-openagent" \
+                     "$HOME/.config/oh-my-opencode" \
+                     "$HOME/.local/share/oh-my-openagent" \
+                     "$HOME/.local/share/oh-my-opencode" \
+                     "$HOME/.cache/oh-my-openagent" \
+                     "$HOME/.cache/oh-my-opencode" \
+                     "$HOME/.oh-my-openagent" \
+                     "$HOME/.oh-my-opencode"
 
             if [ -d "/tmp/opencode-restore/config" ]; then
               echo "Restoring OpenCode config files..."
@@ -102,6 +110,16 @@ jobs:
               echo "Restoring Worktree config files..."
               cp -rv /tmp/opencode-restore/opencode-worktree/* "$HOME/.config/opencode-worktree/" 2>/dev/null || true
             fi
+
+            # Restore Oh My OpenAgent / legacy Oh My OpenCode folders separately.
+            [ -d "/tmp/opencode-restore/omo-config-openagent" ] && cp -rv /tmp/opencode-restore/omo-config-openagent/* "$HOME/.config/oh-my-openagent/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-config-opencode" ] && cp -rv /tmp/opencode-restore/omo-config-opencode/* "$HOME/.config/oh-my-opencode/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-share-openagent" ] && cp -rv /tmp/opencode-restore/omo-share-openagent/* "$HOME/.local/share/oh-my-openagent/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-share-opencode" ] && cp -rv /tmp/opencode-restore/omo-share-opencode/* "$HOME/.local/share/oh-my-opencode/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-cache-openagent" ] && cp -rv /tmp/opencode-restore/omo-cache-openagent/* "$HOME/.cache/oh-my-openagent/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-cache-opencode" ] && cp -rv /tmp/opencode-restore/omo-cache-opencode/* "$HOME/.cache/oh-my-opencode/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-home-openagent" ] && cp -rv /tmp/opencode-restore/omo-home-openagent/* "$HOME/.oh-my-openagent/" 2>/dev/null || true
+            [ -d "/tmp/opencode-restore/omo-home-opencode" ] && cp -rv /tmp/opencode-restore/omo-home-opencode/* "$HOME/.oh-my-opencode/" 2>/dev/null || true
 
             if [ -f "/tmp/opencode-restore/auth.json" ]; then
               echo "Restoring auth.json..."
@@ -157,34 +175,6 @@ jobs:
             echo "No previous session found. Fresh start."
           fi
 
-
-      - name: Restore Oh My OpenAgent Data
-        run: |
-          set -euo pipefail
-          echo "Restoring Oh My OpenAgent / Oh My OpenCode files..."
-          mkdir -p "$HOME/.config/opencode" \
-                   "$HOME/.config/oh-my-openagent" \
-                   "$HOME/.config/oh-my-opencode" \
-                   "$HOME/.local/share/oh-my-openagent" \
-                   "$HOME/.local/share/oh-my-opencode" \
-                   "$HOME/.cache/oh-my-openagent" \
-                   "$HOME/.cache/oh-my-opencode" \
-                   "$HOME/.oh-my-openagent" \
-                   "$HOME/.oh-my-opencode"
-
-          [ -d "/tmp/opencode-restore/opencode-omo-config" ] && cp -rv /tmp/opencode-restore/opencode-omo-config/* "$HOME/.config/opencode/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-config-openagent" ] && cp -rv /tmp/opencode-restore/omo-config-openagent/* "$HOME/.config/oh-my-openagent/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-config-opencode" ] && cp -rv /tmp/opencode-restore/omo-config-opencode/* "$HOME/.config/oh-my-opencode/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-share-openagent" ] && cp -rv /tmp/opencode-restore/omo-share-openagent/* "$HOME/.local/share/oh-my-openagent/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-share-opencode" ] && cp -rv /tmp/opencode-restore/omo-share-opencode/* "$HOME/.local/share/oh-my-opencode/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-cache-openagent" ] && cp -rv /tmp/opencode-restore/omo-cache-openagent/* "$HOME/.cache/oh-my-openagent/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-cache-opencode" ] && cp -rv /tmp/opencode-restore/omo-cache-opencode/* "$HOME/.cache/oh-my-opencode/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-home-openagent" ] && cp -rv /tmp/opencode-restore/omo-home-openagent/* "$HOME/.oh-my-openagent/" 2>/dev/null || true
-          [ -d "/tmp/opencode-restore/omo-home-opencode" ] && cp -rv /tmp/opencode-restore/omo-home-opencode/* "$HOME/.oh-my-opencode/" 2>/dev/null || true
-          if [ -d "/tmp/opencode-restore/repo-omo-configs" ]; then
-            (cd /tmp/opencode-restore/repo-omo-configs && tar -cf - .) | (cd "$HOME/repos" && tar -xf -) 2>/dev/null || true
-          fi
-
       # ============================================================
       # CACHE: Speed up npm installations
       # ============================================================
@@ -204,7 +194,7 @@ jobs:
 
       - name: Install Tools
         run: |
-          npm install -g opencode-ai @openchamber/web oh-my-openagent oh-my-opencode
+          npm install -g opencode-ai @openchamber/web
           sudo apt update
           sudo apt install -y jq lsof coreutils curl wget
 
@@ -231,9 +221,6 @@ jobs:
                 "options": {
                   "baseURL": "https://anyrouter.top/v1",
                   "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
-                  "store": true,
-                  "include": [],
-                  "reasoningSummary": "detailed"
                 }
               },
               "evolvex": {
@@ -320,18 +307,16 @@ jobs:
           }
           EOF
 
-      - name: Normalize Agent Model and Temperature Overrides
+
+      - name: Configure OmO/OpenCode Agents to Inherit Current Model
         run: |
           set -euo pipefail
-          echo "Removing explicit model/temperature overrides from OpenCode and OmO agent configs. Provider config is not rewritten."
           mkdir -p "$HOME/.config/opencode"
 
-          # Keep OmO registered, but make the user config contain no per-agent model or sampling overrides.
-          # oh-my-opencode.* is written too because OmO currently checks the legacy basename first when both exist.
+          # IMPORTANT: do not write null here. OpenCode's documented behavior is based on the key being absent.
+          # OmO recognizes both basenames during the rename; legacy oh-my-opencode wins if both exist.
           cat > "$HOME/.config/opencode/oh-my-opencode.jsonc" <<'EOF'
           {
-            "model_fallback": false,
-            "disabled_hooks": ["runtime-fallback"],
             "agents": {
               "sisyphus": {},
               "hephaestus": {},
@@ -344,252 +329,202 @@ jobs:
               "momus": {},
               "atlas": {},
               "sisyphus-junior": {}
-            }
+            },
+            "categories": {},
+            "disabled_categories": [
+              "visual-engineering",
+              "ultrabrain",
+              "deep",
+              "artistry",
+              "quick",
+              "unspecified-low",
+              "unspecified-high",
+              "writing"
+            ],
+            "runtime_fallback": false,
+            "disabled_hooks": ["model-fallback", "runtime-fallback"]
           }
           EOF
           cp "$HOME/.config/opencode/oh-my-opencode.jsonc" "$HOME/.config/opencode/oh-my-openagent.jsonc"
 
+          # Remove agent-level routing/sampling keys from restored and repo-level config files.
+          # Do not touch provider model definitions or top-level selected model.
           python3 <<'PY'
-          from __future__ import annotations
+          import json, os, re
           from pathlib import Path
-          import json, re, os
 
           HOME = Path.home()
-          REPOS = HOME / "repos"
-          STRIP_KEYS = {"model", "fallback_models", "fallbackModels", "temperature", "top_p", "topP"}
-          CONTAINER_KEYS = {"agent", "agents", "command", "commands", "categories"}
+          ROUTING_KEYS = {"model", "fallback_models", "fallbackModels", "temperature", "top_p", "topP", "variant"}
 
-          def strip_jsonc_comments(s: str) -> str:
+          def strip_json_comments(s: str) -> str:
               out = []
               i = 0
               in_str = False
-              quote = ""
               esc = False
               while i < len(s):
                   c = s[i]
-                  n = s[i+1] if i + 1 < len(s) else ""
+                  n = s[i+1] if i+1 < len(s) else ''
                   if in_str:
                       out.append(c)
                       if esc:
                           esc = False
-                      elif c == "\\":
+                      elif c == '\\':
                           esc = True
-                      elif c == quote:
+                      elif c == '"':
                           in_str = False
                       i += 1
-                      continue
-                  if c in ('"', "'"):
-                      in_str = True
-                      quote = c
-                      out.append(c)
-                      i += 1
-                      continue
-                  if c == "/" and n == "/":
-                      while i < len(s) and s[i] not in "\r\n":
+                  else:
+                      if c == '"':
+                          in_str = True
+                          out.append(c)
                           i += 1
-                      out.append("\n")
-                      continue
-                  if c == "/" and n == "*":
-                      i += 2
-                      while i + 1 < len(s) and not (s[i] == "*" and s[i+1] == "/"):
+                      elif c == '/' and n == '/':
+                          while i < len(s) and s[i] not in '\r\n':
+                              i += 1
+                      elif c == '/' and n == '*':
+                          i += 2
+                          while i+1 < len(s) and not (s[i] == '*' and s[i+1] == '/'):
+                              i += 1
+                          i += 2
+                      else:
+                          out.append(c)
                           i += 1
-                      i += 2
-                      continue
-                  out.append(c)
-                  i += 1
-              return "".join(out)
+              return ''.join(out)
 
-          def parse_jsonc(text: str):
-              clean = strip_jsonc_comments(text)
-              clean = re.sub(r",\s*([}\]])", r"\1", clean)
-              return json.loads(clean)
+          def remove_trailing_commas(s: str) -> str:
+              return re.sub(r',\s*([}\]])', r'\1', s)
 
-          def strip_agentish(obj, active=False):
-              changed = False
+          def load_jsonc(p: Path):
+              raw = p.read_text(errors='ignore')
+              return json.loads(remove_trailing_commas(strip_json_comments(raw)))
+
+          def dump_json(p: Path, data):
+              p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + '\n')
+
+          def deep_remove(obj):
               if isinstance(obj, dict):
-                  if active:
-                      for k in list(obj.keys()):
-                          if k in STRIP_KEYS:
-                              del obj[k]
-                              changed = True
-                  for k, v in list(obj.items()):
-                      child_active = active or k in CONTAINER_KEYS
-                      if strip_agentish(v, child_active):
-                          changed = True
+                  for k in list(obj.keys()):
+                      if k in ROUTING_KEYS:
+                          obj.pop(k, None)
+                      else:
+                          deep_remove(obj[k])
               elif isinstance(obj, list):
-                  for v in obj:
-                      if strip_agentish(v, active):
-                          changed = True
-              return changed
+                  for item in obj:
+                      deep_remove(item)
 
-          def rewrite_jsonc_file(path: Path):
+          def strip_open_code_config(p: Path):
               try:
-                  raw = path.read_text(errors="ignore")
-                  data = parse_jsonc(raw)
-              except Exception:
-                  return False
-              changed = strip_agentish(data, False)
-              if changed:
-                  path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
-                  print(f"stripped agent model/temp keys: {path}")
-              return changed
-
-          def strip_frontmatter(path: Path):
-              try:
-                  text = path.read_text(errors="ignore")
-              except Exception:
-                  return False
-              if not text.startswith("---"):
-                  return False
-              parts = text.split("---", 2)
-              if len(parts) < 3:
-                  return False
-              fm = parts[1]
-              body = parts[2]
-              lines = fm.splitlines(True)
-              new = []
+                  data = load_jsonc(p)
+              except Exception as e:
+                  print(f"skip non-parseable OpenCode config {p}: {e}")
+                  return
               changed = False
-              i = 0
-              key_re = re.compile(r"^(\s*)(model|fallback_models|fallbackModels|temperature|top_p|topP)\s*:")
-              while i < len(lines):
-                  line = lines[i]
-                  m = key_re.match(line)
-                  if not m:
-                      new.append(line)
-                      i += 1
-                      continue
-                  changed = True
-                  indent = len(m.group(1))
-                  i += 1
-                  # If the removed key has a block value, remove indented continuation lines too.
-                  while i < len(lines):
-                      nxt = lines[i]
-                      if not nxt.strip():
-                          i += 1
-                          continue
-                      cur_indent = len(nxt) - len(nxt.lstrip(" "))
-                      if cur_indent > indent:
-                          i += 1
-                          continue
-                      break
+              for section in ("agent", "agents", "command", "commands"):
+                  if isinstance(data.get(section), dict):
+                      before = json.dumps(data[section], sort_keys=True, default=str)
+                      deep_remove(data[section])
+                      after = json.dumps(data[section], sort_keys=True, default=str)
+                      changed = changed or before != after
               if changed:
-                  path.write_text("---" + "".join(new) + "---" + body)
-                  print(f"stripped agent frontmatter: {path}")
-              return changed
+                  dump_json(p, data)
+                  print(f"stripped OpenCode agent/command overrides: {p}")
 
-          json_paths = set()
-          candidates = [
-              HOME / ".config/opencode",
-              HOME / ".config/oh-my-openagent",
-              HOME / ".config/oh-my-opencode",
-              HOME / ".local/share/oh-my-openagent",
-              HOME / ".local/share/oh-my-opencode",
-              HOME / ".cache/oh-my-openagent",
-              HOME / ".cache/oh-my-opencode",
-              HOME / ".oh-my-openagent",
-              HOME / ".oh-my-opencode",
-          ]
-          for base in candidates:
-              if base.exists():
-                  for pat in ("opencode.json", "opencode.jsonc", "oh-my-openagent.json", "oh-my-openagent.jsonc", "oh-my-opencode.json", "oh-my-opencode.jsonc"):
-                      json_paths.update(base.rglob(pat))
-          if REPOS.exists():
-              for pat in ("**/opencode.json", "**/opencode.jsonc", "**/.opencode/oh-my-openagent.json", "**/.opencode/oh-my-openagent.jsonc", "**/.opencode/oh-my-opencode.json", "**/.opencode/oh-my-opencode.jsonc"):
-                  json_paths.update(REPOS.glob(pat))
+          def strip_omo_config(p: Path):
+              try:
+                  data = load_jsonc(p)
+              except Exception as e:
+                  print(f"skip non-parseable OmO config {p}: {e}")
+                  return
+              before = json.dumps(data, sort_keys=True, default=str)
+              for section in ("agents", "categories"):
+                  if isinstance(data.get(section), dict):
+                      deep_remove(data[section])
+              data["runtime_fallback"] = False
+              hooks = data.get("disabled_hooks")
+              if not isinstance(hooks, list):
+                  hooks = []
+              for h in ("model-fallback", "runtime-fallback"):
+                  if h not in hooks:
+                      hooks.append(h)
+              data["disabled_hooks"] = hooks
+              disabled = data.get("disabled_categories")
+              if not isinstance(disabled, list):
+                  disabled = []
+              for c in ["visual-engineering", "ultrabrain", "deep", "artistry", "quick", "unspecified-low", "unspecified-high", "writing"]:
+                  if c not in disabled:
+                      disabled.append(c)
+              data["disabled_categories"] = disabled
+              after = json.dumps(data, sort_keys=True, default=str)
+              if before != after:
+                  dump_json(p, data)
+                  print(f"stripped OmO routing overrides: {p}")
 
-          for p in sorted(json_paths):
-              rewrite_jsonc_file(p)
+          def strip_frontmatter(p: Path):
+              text = p.read_text(errors='ignore')
+              if not text.startswith('---'):
+                  return
+              m = re.match(r'(?s)^---\r?\n(.*?)\r?\n---(.*)$', text)
+              if not m:
+                  return
+              fm, body = m.group(1), m.group(2)
+              changed = False
+              kept = []
+              for line in fm.splitlines():
+                  key = line.split(':', 1)[0].strip()
+                  if key in ROUTING_KEYS:
+                      changed = True
+                      continue
+                  kept.append(line)
+              if changed:
+                  p.write_text('---\n' + '\n'.join(kept).rstrip() + '\n---' + body)
+                  print(f"stripped markdown frontmatter overrides: {p}")
 
-          md_paths = set()
-          md_dirs = [HOME / ".config/opencode/agents", HOME / ".config/opencode/agent", HOME / ".config/opencode/commands", HOME / ".config/opencode/command"]
-          if REPOS.exists():
-              for pat in ("**/.opencode/agents", "**/.opencode/agent", "**/.opencode/commands", "**/.opencode/command"):
-                  md_dirs.extend(REPOS.glob(pat))
-          for d in md_dirs:
+          paths = []
+          # OmO config files: dedicated OmO config, safe to strip models/categories.
+          paths += list((HOME / '.config/opencode').glob('oh-my-openagent.json*'))
+          paths += list((HOME / '.config/opencode').glob('oh-my-opencode.json*'))
+          repos = HOME / 'repos'
+          if repos.exists():
+              paths += list(repos.glob('**/.opencode/oh-my-openagent.json*'))
+              paths += list(repos.glob('**/.opencode/oh-my-opencode.json*'))
+          for p in sorted(set(paths)):
+              strip_omo_config(p)
+
+          # OpenCode config files: only strip inside agent/command sections.
+          oc_paths = []
+          oc_paths += list((HOME / '.config/opencode').glob('opencode.json*'))
+          if repos.exists():
+              oc_paths += list(repos.glob('**/opencode.json*'))
+              oc_paths += list(repos.glob('**/.opencode/opencode.json*'))
+          for p in sorted(set(oc_paths)):
+              strip_open_code_config(p)
+
+          # Markdown agents/commands: strip model/temp only from frontmatter.
+          md_paths = []
+          for d in [HOME / '.config/opencode/agents', HOME / '.config/opencode/agent', HOME / '.config/opencode/commands', HOME / '.config/opencode/command']:
               if d.exists():
-                  md_paths.update(d.rglob("*.md"))
-          for p in sorted(md_paths):
+                  md_paths += list(d.rglob('*.md'))
+          if repos.exists():
+              for pat in ['**/.opencode/agents/**/*.md', '**/.opencode/agent/**/*.md', '**/.opencode/commands/**/*.md', '**/.opencode/command/**/*.md']:
+                  md_paths += list(repos.glob(pat))
+          for p in sorted(set(md_paths)):
               strip_frontmatter(p)
           PY
 
-          # Best-effort local package patch. OmO has built-in model chains; empty config alone can still leave
-          # models visible in the OpenCode agent editor. This changes only local runner package files, not GitHub.
-          python3 <<'PY'
-          from pathlib import Path
-          import os, re, subprocess
-          HOME = Path.home()
-          roots = []
-          try:
-              npm_root = subprocess.check_output(["npm", "root", "-g"], text=True).strip()
-              roots.append(Path(npm_root))
-          except Exception:
-              pass
-          roots += [
-              HOME / ".config/opencode/node_modules",
-              HOME / ".local/share/opencode/bin/node_modules",
-              HOME / ".cache/opencode",
-              HOME / ".npm/_npx",
-          ]
-          packages = []
-          for root in roots:
-              if not root.exists():
-                  continue
-              for name in ("oh-my-openagent", "oh-my-opencode"):
-                  packages.extend(root.rglob(name))
-          seen = set()
-          packages = [p for p in packages if p.is_dir() and not (str(p) in seen or seen.add(str(p)))]
-          signals = [
-              "Sisyphus", "THE LIBRARIAN", "librarian", "claude-opus-4-7", "gpt-5.4-mini-fast",
-              "fallback_models", "runtime-fallback", "visual-engineering", "ultrabrain"
-          ]
-          js_files = []
-          data_files = []
-          for pkg in packages:
-              for p in pkg.rglob("*"):
-                  if not p.is_file():
-                      continue
-                  if p.suffix in (".js", ".mjs", ".cjs", ".ts"):
-                      js_files.append(p)
-                  elif p.suffix in (".json", ".jsonc", ".md", ".yaml", ".yml"):
-                      data_files.append(p)
-          changed = 0
-          for p in js_files:
-              try:
-                  s = p.read_text(errors="ignore")
-              except Exception:
-                  continue
-              if not any(sig in s for sig in signals):
-                  continue
-              orig = s
-              # Set hard-coded agent/category models and sampling params to undefined without touching providers.
-              s = re.sub(r'(?<![\w$])model\s*:\s*["\'][^"\']+["\']', 'model: undefined', s)
-              s = re.sub(r'(["\'])model\1\s*:\s*["\'][^"\']+["\']', r'\1model\1: undefined', s)
-              s = re.sub(r'(?<![\w$])temperature\s*:\s*-?\d+(?:\.\d+)?', 'temperature: undefined', s)
-              s = re.sub(r'(["\'])temperature\1\s*:\s*-?\d+(?:\.\d+)?', r'\1temperature\1: undefined', s)
-              s = re.sub(r'(?<![\w$])top_p\s*:\s*-?\d+(?:\.\d+)?', 'top_p: undefined', s)
-              s = re.sub(r'(["\'])top_p\1\s*:\s*-?\d+(?:\.\d+)?', r'\1top_p\1: undefined', s)
-              s = re.sub(r'(?<![\w$])topP\s*:\s*-?\d+(?:\.\d+)?', 'topP: undefined', s)
-              s = re.sub(r'(["\'])topP\1\s*:\s*-?\d+(?:\.\d+)?', r'\1topP\1: undefined', s)
-              s = re.sub(r'(?<![\w$])fallback_models\s*:\s*\[[\s\S]*?\]', 'fallback_models: []', s)
-              s = re.sub(r'(?<![\w$])fallbackModels\s*:\s*\[[\s\S]*?\]', 'fallbackModels: []', s)
-              if s != orig:
-                  p.write_text(s)
-                  changed += 1
-                  print(f"patched local OmO package defaults: {p}")
-          print(f"Local OmO package files patched: {changed}")
-          PY
-
-          echo "Remaining explicit OpenCode/OmO agent model or temperature keys in saved config files:"
+          echo "Audit: remaining explicit model/temperature fields in OmO and agent files:"
           {
-            find "$HOME/.config/opencode" "$HOME/.config/oh-my-openagent" "$HOME/.config/oh-my-opencode" "$HOME/.local/share/oh-my-openagent" "$HOME/.local/share/oh-my-opencode" "$HOME/.cache/oh-my-openagent" "$HOME/.cache/oh-my-opencode" "$HOME/.oh-my-openagent" "$HOME/.oh-my-opencode" -type f 2>/dev/null
-            find "$HOME/repos" -type f 2>/dev/null
-          } | grep -E '(opencode\.jsonc?$|oh-my-openagent\.jsonc?$|oh-my-opencode\.jsonc?$|/agents?/.*\.md$|/commands?/.*\.md$)' \
-            | while read -r f; do
-                if grep -nE '^[[:space:]]*("?)(model|fallback_models|fallbackModels|temperature|top_p|topP)\1[[:space:]]*:' "$f" >/dev/null 2>&1; then
-                  echo "WARN: $f still has direct agent/model-like key(s)"
-                  grep -nE '^[[:space:]]*("?)(model|fallback_models|fallbackModels|temperature|top_p|topP)\1[[:space:]]*:' "$f" | sed 's/:.*$/: <redacted>/' || true
-                fi
-              done
+            grep -RInE '(^|[[:space:]])(model|temperature|top_p|topP|fallback_models|fallbackModels|variant):|"(model|temperature|top_p|topP|fallback_models|fallbackModels|variant)"[[:space:]]*:' \
+              "$HOME/.config/opencode/oh-my-opencode.jsonc" \
+              "$HOME/.config/opencode/oh-my-openagent.jsonc" \
+              "$HOME/.config/opencode/agents" \
+              "$HOME/.config/opencode/agent" \
+              "$HOME/.config/opencode/commands" \
+              "$HOME/.config/opencode/command" 2>/dev/null || true
+            if [ -d "$HOME/repos" ]; then
+              find "$HOME/repos" -path '*/.opencode/*' \( -name '*.md' -o -name 'oh-my-openagent.json*' -o -name 'oh-my-opencode.json*' \) -print0 2>/dev/null \
+                | xargs -0 grep -InE '(^|[[:space:]])(model|temperature|top_p|topP|fallback_models|fallbackModels|variant):|"(model|temperature|top_p|topP|fallback_models|fallbackModels|variant)"[[:space:]]*:' 2>/dev/null || true
+            fi
+          } | sed 's#'"$HOME"'#~#g'
 
       - name: Initial Startup
         run: |
@@ -734,7 +669,15 @@ jobs:
                    /tmp/opencode-save/storage \
                    /tmp/opencode-save/cache \
                    /tmp/opencode-save/log \
-                   /tmp/opencode-save/bin
+                   /tmp/opencode-save/bin \
+                   /tmp/opencode-save/omo-config-openagent \
+                   /tmp/opencode-save/omo-config-opencode \
+                   /tmp/opencode-save/omo-share-openagent \
+                   /tmp/opencode-save/omo-share-opencode \
+                   /tmp/opencode-save/omo-cache-openagent \
+                   /tmp/opencode-save/omo-cache-opencode \
+                   /tmp/opencode-save/omo-home-openagent \
+                   /tmp/opencode-save/omo-home-opencode
 
           if [ -d "$HOME/.config/opencode" ] && [ "$(ls -A "$HOME/.config/opencode" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode/"* /tmp/opencode-save/config/ 2>/dev/null || true
@@ -749,6 +692,17 @@ jobs:
           else
             echo "No OpenChamber config data to save"
           fi
+
+          # Save Oh My OpenAgent / legacy Oh My OpenCode folders explicitly.
+          [ -d "$HOME/.config/oh-my-openagent" ] && cp -rv "$HOME/.config/oh-my-openagent/"* /tmp/opencode-save/omo-config-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.config/oh-my-opencode" ] && cp -rv "$HOME/.config/oh-my-opencode/"* /tmp/opencode-save/omo-config-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.local/share/oh-my-openagent" ] && cp -rv "$HOME/.local/share/oh-my-openagent/"* /tmp/opencode-save/omo-share-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.local/share/oh-my-opencode" ] && cp -rv "$HOME/.local/share/oh-my-opencode/"* /tmp/opencode-save/omo-share-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.cache/oh-my-openagent" ] && cp -rv "$HOME/.cache/oh-my-openagent/"* /tmp/opencode-save/omo-cache-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.cache/oh-my-opencode" ] && cp -rv "$HOME/.cache/oh-my-opencode/"* /tmp/opencode-save/omo-cache-opencode/ 2>/dev/null || true
+          [ -d "$HOME/.oh-my-openagent" ] && cp -rv "$HOME/.oh-my-openagent/"* /tmp/opencode-save/omo-home-openagent/ 2>/dev/null || true
+          [ -d "$HOME/.oh-my-opencode" ] && cp -rv "$HOME/.oh-my-opencode/"* /tmp/opencode-save/omo-home-opencode/ 2>/dev/null || true
+          echo "Oh My OpenAgent/OpenCode folders saved: $(find /tmp/opencode-save/omo-* -type f 2>/dev/null | wc -l) files"
 
           if [ -d "$HOME/.config/opencode-worktree" ] && [ "$(ls -A "$HOME/.config/opencode-worktree" 2>/dev/null)" ]; then
             cp -rv "$HOME/.config/opencode-worktree/"* /tmp/opencode-save/opencode-worktree/ 2>/dev/null || true
@@ -810,45 +764,6 @@ jobs:
           else
             echo "No session data to save - creating placeholder"
             echo "$(date): No session data available" > /tmp/opencode-save/placeholder.txt
-          fi
-
-      - name: Save Oh My OpenAgent Data
-        if: always()
-        run: |
-          set -euo pipefail
-          echo "Saving Oh My OpenAgent / Oh My OpenCode files..."
-          mkdir -p /tmp/opencode-save/opencode-omo-config \
-                   /tmp/opencode-save/omo-config-openagent \
-                   /tmp/opencode-save/omo-config-opencode \
-                   /tmp/opencode-save/omo-share-openagent \
-                   /tmp/opencode-save/omo-share-opencode \
-                   /tmp/opencode-save/omo-cache-openagent \
-                   /tmp/opencode-save/omo-cache-opencode \
-                   /tmp/opencode-save/omo-home-openagent \
-                   /tmp/opencode-save/omo-home-opencode \
-                   /tmp/opencode-save/repo-omo-configs
-
-          find "$HOME/.config/opencode" -maxdepth 1 -type f \( \
-            -name 'oh-my-openagent.json' -o -name 'oh-my-openagent.jsonc' -o \
-            -name 'oh-my-opencode.json' -o -name 'oh-my-opencode.jsonc' \
-          \) -exec cp -v {} /tmp/opencode-save/opencode-omo-config/ \; 2>/dev/null || true
-
-          [ -d "$HOME/.config/oh-my-openagent" ] && cp -rv "$HOME/.config/oh-my-openagent/"* /tmp/opencode-save/omo-config-openagent/ 2>/dev/null || true
-          [ -d "$HOME/.config/oh-my-opencode" ] && cp -rv "$HOME/.config/oh-my-opencode/"* /tmp/opencode-save/omo-config-opencode/ 2>/dev/null || true
-          [ -d "$HOME/.local/share/oh-my-openagent" ] && cp -rv "$HOME/.local/share/oh-my-openagent/"* /tmp/opencode-save/omo-share-openagent/ 2>/dev/null || true
-          [ -d "$HOME/.local/share/oh-my-opencode" ] && cp -rv "$HOME/.local/share/oh-my-opencode/"* /tmp/opencode-save/omo-share-opencode/ 2>/dev/null || true
-          [ -d "$HOME/.cache/oh-my-openagent" ] && cp -rv "$HOME/.cache/oh-my-openagent/"* /tmp/opencode-save/omo-cache-openagent/ 2>/dev/null || true
-          [ -d "$HOME/.cache/oh-my-opencode" ] && cp -rv "$HOME/.cache/oh-my-opencode/"* /tmp/opencode-save/omo-cache-opencode/ 2>/dev/null || true
-          [ -d "$HOME/.oh-my-openagent" ] && cp -rv "$HOME/.oh-my-openagent/"* /tmp/opencode-save/omo-home-openagent/ 2>/dev/null || true
-          [ -d "$HOME/.oh-my-opencode" ] && cp -rv "$HOME/.oh-my-opencode/"* /tmp/opencode-save/omo-home-opencode/ 2>/dev/null || true
-
-          if [ -d "$HOME/repos" ]; then
-            (cd "$HOME/repos" && find . -type f \( \
-              -path '*/.opencode/oh-my-openagent.json' -o \
-              -path '*/.opencode/oh-my-openagent.jsonc' -o \
-              -path '*/.opencode/oh-my-opencode.json' -o \
-              -path '*/.opencode/oh-my-opencode.jsonc' \
-            \) -print0 | tar --null -T - -cf -) | (cd /tmp/opencode-save/repo-omo-configs && tar -xf -) 2>/dev/null || true
           fi
 
       - name: Upload Session Data (Artifact)
