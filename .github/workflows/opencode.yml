@@ -223,7 +223,16 @@ jobs:
                 },
                 "models": {
                   "claude-opus-4.7": {
-                    "name": "Claude Opus 4.7"
+                    "name": "Claude Opus 4.7",
+                    "limit": { "context": 1000000, "output": 128000 },
+                    "modalities": { "input": ["text", "image"], "output": ["text"] },
+                    "options": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+                    "variants": {
+                      "none":   { "thinking": { "type": "disabled" } },
+                      "low":    { "thinking": { "type": "enabled", "budgetTokens": 4000 } },
+                      "medium": { "thinking": { "type": "enabled", "budgetTokens": 16000 } },
+                      "high":   { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+                      "max":    { "thinking": { "type": "enabled", "budgetTokens": 100000 } }
                   }
                 }
               },
