@@ -208,6 +208,12 @@ jobs:
                   "reasoningSummary": "detailed"
                 }
               },
+              "anthropic": {
+                "options": {
+                  "baseURL": "https://logfare.ai/v1",
+                  "apiKey": "lfu_GJ8qxCIVVD7Zf2yVfoQTz2HPM6mTERs0"
+                }
+              },
               "evolvex": {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "Modal",
