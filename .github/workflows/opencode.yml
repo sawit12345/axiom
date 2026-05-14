@@ -216,14 +216,14 @@ jobs:
               },
               "evolvex": {
                 "npm": "@ai-sdk/openai-compatible",
-                "name": "Modal",
+                "name": "logfare",
                 "options": {
-                  "baseURL": "https://api.us-west-2.modal.direct/v1",
+                  "baseURL": "https://logfare.ai/v1",
                   "apiKey": "{env:EVOLVEX_API_KEY}"
                 },
                 "models": {
-                  "zai-org/GLM-5.1-FP8": {
-                    "name": "GLM-5.1"
+                  "claude-opus-4.7": {
+                    "name": "Claude Opus 4.7"
                   }
                 }
               },
