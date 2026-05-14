@@ -235,6 +235,7 @@ jobs:
                       "max":    { "thinking": { "type": "enabled", "budgetTokens": 100000 } }
                   }
                 }
+               }
               },
               "google": {
                 "models": {
