@@ -210,8 +210,8 @@ jobs:
               },
               "anthropic": {
                 "options": {
-                  "baseURL": "https://logfare.ai/v1",
-                  "apiKey": "lfu_GJ8qxCIVVD7Zf2yVfoQTz2HPM6mTERs0"
+                  "baseURL": "https://anyrouter.top",
+                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb"
                 }
               },
               "evolvex": {
