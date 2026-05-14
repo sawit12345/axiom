@@ -210,7 +210,7 @@ jobs:
               },
               "anthropic": {
                 "options": {
-                  "baseURL": "https://anyrouter.top",
+                  "baseURL": "https://anyrouter.top/v1",
                   "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb"
                 }
               },
