@@ -218,8 +218,8 @@ jobs:
                   }
                 },
                 "env": [
-                  "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
-                  "CLAUDE_CODE_1M_CONTEXT": "1"
+                  "ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-8",
+                  "CLAUDE_CODE_1M_CONTEXT=1"
                 ],
                 "model": "opus[1m]"
               },
