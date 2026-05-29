@@ -217,10 +217,10 @@ jobs:
                     "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,adaptive-thinking-2026-01-28,context-management-2025-06-27,prompt-caching-scope-2026-01-05,effort-2025-11-24"
                   }
                 },
-                "env": {
+                "env": [
                   "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-8",
                   "CLAUDE_CODE_1M_CONTEXT": "1"
-                },
+                ],
                 "model": "opus[1m]"
               },
               "evolvex": {
