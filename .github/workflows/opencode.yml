@@ -211,7 +211,9 @@ jobs:
               "anthropic": {
                 "options": {
                   "baseURL": "https://anyrouter.top/v1",
-                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb"
+                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
+                  "headers": {
+                    "anthropic-beta": "context-1m-2025-08-07"
                 }
               },
               "evolvex": {
