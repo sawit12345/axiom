@@ -208,27 +208,6 @@ jobs:
                   "reasoningSummary": "detailed"
                 }
               },
-              "anthropic": {
-                "options": {
-                  "baseURL": "https://anyrouter.top/v1",
-                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
-                  "headers": {
-                    "X-Claude-Code-Session-Id": "550e8400-e29b-41d4-a716-446655440000",
-                    "anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14,adaptive-thinking-2026-01-28,context-management-2025-06-27,prompt-caching-scope-2026-01-05,effort-2025-11-24"
-                  }
-                },
-                "models": {
-                  "opus[1m]": {
-                  "name:" "Claude Opus 4.8 custom",
-                  "limit": { "context": 1000000, "output": 128000 },
-                  "modalities": { "input": ["text", "image"], "output": ["text"] }
-                  }
-                },
-                "env": [
-                  "ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-8",
-                  "CLAUDE_CODE_1M_CONTEXT=1"
-                ]
-              },
               "evolvex": {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "logfare",
