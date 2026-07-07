@@ -199,13 +199,10 @@ jobs:
             "$schema": "https://opencode.ai/config.json",
             "plugin": ["opencode-antigravity-auth@beta"],
             "provider": {
-              "openai": {
+              "anthropic": {
                 "options": {
-                  "baseURL": "https://anyrouter.top/v1",
-                  "apiKey": "sk-Ntp7Be3U7aRQjtNyLUJReKeO6wuInQrnha5VaL8wvmxOf6pb",
-                  "store": true,
-                  "include": [],
-                  "reasoningSummary": "detailed"
+                  "baseURL": "https://agentrouter.org/v1",
+                  "apiKey": "sk-dcURlRIlJH8e4O7TQbyulwmuyLAhBzStKJ8F0bEZVXbi5h2f"
                 }
               },
               "evolvex": {
