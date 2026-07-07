@@ -217,14 +217,14 @@ jobs:
                     "name": "Claude Opus 4-8",
                     "limit": { "context": 1000000, "output": 128000 },
                     "modalities": { "input": ["text", "image"], "output": ["text"] },
-                    "options": { "thinking": { "type": "adaptive", "budgetTokens": 10000 } },
+                    "options": { "thinking": { "type": "adaptive" } },
                     "variants": {
-                      "none":   { "thinking": { "type": "disabled" } },
-                      "low":    { "thinking": { "type": "adaptive", "budgetTokens": 4000 } },
-                      "medium": { "thinking": { "type": "adaptive", "budgetTokens": 16000 } },
-                      "high":   { "thinking": { "type": "adaptive", "budgetTokens": 32000 } },
-                      "xhigh":  { "thinking": { "type": "adaptive", "budgetTokens": 64000 } },
-                      "max":    { "thinking": { "type": "adaptive", "budgetTokens": 128000 } }
+                      "none":   { "output_config": { "effort": "none" } },
+                      "low":    { "output_config": { "effort": "low" } },
+                      "medium": { "output_config": { "effort": "medium" } },
+                      "high":   { "output_config": { "effort": "high" } },
+                      "xhigh":  { "output_config": { "effort": "xhigh" } },
+                      "max":    { "output_config": { "effort": "max" } }
                   }
                 }
                }
