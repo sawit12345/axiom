@@ -202,7 +202,7 @@ jobs:
               "anthropic": {
                 "options": {
                   "baseURL": "https://agentrouter.org/v1",
-                  "apiKey": "sk-dcURlRIlJH8e4O7TQbyulwmuyLAhBzStKJ8F0bEZVXbi5h2f"
+                  "apiKey": "none"
                 }
               },
               "evolvex": {
