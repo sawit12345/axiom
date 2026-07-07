@@ -206,24 +206,25 @@ jobs:
                 }
               },
               "evolvex": {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": "logfare",
+                "npm": "@ai-sdk/anthropic",
+                "name": "agentrouter",
                 "options": {
-                  "baseURL": "https://logfare.ai/v1",
+                  "baseURL": "https://agentrouter.org",
                   "apiKey": "{env:EVOLVEX_API_KEY}"
                 },
                 "models": {
-                  "claude-opus-4.7": {
-                    "name": "Claude Opus 4.7",
+                  "claude-opus-4-8": {
+                    "name": "Claude Opus 4-8",
                     "limit": { "context": 1000000, "output": 128000 },
                     "modalities": { "input": ["text", "image"], "output": ["text"] },
-                    "options": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+                    "options": { "thinking": { "type": "adaptive", "budgetTokens": 10000 } },
                     "variants": {
                       "none":   { "thinking": { "type": "disabled" } },
-                      "low":    { "thinking": { "type": "enabled", "budgetTokens": 4000 } },
-                      "medium": { "thinking": { "type": "enabled", "budgetTokens": 16000 } },
-                      "high":   { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
-                      "max":    { "thinking": { "type": "enabled", "budgetTokens": 100000 } }
+                      "low":    { "thinking": { "type": "adaptive", "budgetTokens": 4000 } },
+                      "medium": { "thinking": { "type": "adaptive", "budgetTokens": 16000 } },
+                      "high":   { "thinking": { "type": "adaptive", "budgetTokens": 32000 } },
+                      "xhigh":  { "thinking": { "type": "adaptive", "budgetTokens": 64000 } },
+                      "max":    { "thinking": { "type": "adaptive", "budgetTokens": 128000 } }
                   }
                 }
                }
