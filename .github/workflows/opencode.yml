@@ -206,7 +206,7 @@ jobs:
                 }
               },
               "evolvex": {
-                "npm": "@ai-sdk/anthropic",
+                "npm": "@ai-sdk/openai-compatible",
                 "name": "agentrouter",
                 "options": {
                   "baseURL": "https://agentrouter.org",
