@@ -6,11 +6,21 @@ on:
       tunnel_provider:
         description: "Select Tunnel Provider"
         required: true
-        default: "ngrok"
+        # CHANGED: default flipped from ngrok -> cloudflare.
+        # ngrok's free tier serves an HTML "interstitial" warning page on
+        # requests that don't carry the `ngrok-skip-browser-warning` header.
+        # OpenChamber's frontend fetch/SSE calls don't set that header, so
+        # some requests going through an ngrok tunnel can silently get back
+        # HTML instead of the real API response -> looks exactly like
+        # "no response" from a provider, even though OpenCode itself is fine.
+        # Cloudflare quick tunnels don't have this interstitial, so they're
+        # now the default. ngrok is left as an option but isn't recommended
+        # until/unless you front it with something that injects that header.
+        default: "cloudflare"
         type: choice
         options:
-          - ngrok
           - cloudflare
+          - ngrok
       timeout_minutes:
         description: "Auto-shutdown after (minutes)"
         required: true
@@ -193,19 +203,29 @@ jobs:
 
       - name: Initial Startup
         run: |
+          # CHANGED (#2): real HTTP health check instead of a raw port-listen
+          # check. A process can keep the port bound while its event loop is
+          # wedged (known upstream hang in OpenCode's session/message
+          # endpoint on long conversations) -- lsof would report it "up"
+          # even though it can no longer serve requests. Hitting the actual
+          # /health endpoint catches that.
+          check_health() {
+            curl -fsS --max-time 5 "http://127.0.0.1:3000/health" >/dev/null 2>&1
+          }
+
           nohup stdbuf -oL openchamber --port 3000 > openchamber.log 2>&1 &
 
-          echo "Waiting for OpenChamber to start..."
+          echo "Waiting for OpenChamber to become healthy..."
           for i in $(seq 1 30); do
-            if lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-              echo "OpenChamber is listening on port 3000"
+            if check_health; then
+              echo "OpenChamber is healthy on port 3000"
               break
             fi
             sleep 2
           done
 
-          if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-            echo "OpenChamber failed to start"
+          if ! check_health; then
+            echo "OpenChamber failed to start / become healthy"
             echo "=== openchamber.log ==="
             tail -n 200 openchamber.log || true
             exit 1
@@ -214,6 +234,13 @@ jobs:
           : > tunnel.log
 
           if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
+            echo "NOTE: ngrok's free tier shows a browser-warning interstitial"
+            echo "on API requests that don't send 'ngrok-skip-browser-warning'."
+            echo "OpenChamber's client doesn't set that header, so some"
+            echo "requests through this tunnel may silently fail. Prefer"
+            echo "the cloudflare tunnel_provider unless you have a reason"
+            echo "to use ngrok specifically."
+
             nohup stdbuf -oL ngrok http 3000 --log=stdout > tunnel.log 2>&1 &
 
             echo "Waiting for ngrok URL..."
@@ -268,6 +295,15 @@ jobs:
 
       - name: Monitor & Self-Heal
         run: |
+          # CHANGED (#2): same real health check used here. Also, since a
+          # wedged process still holds port 3000, we now kill it before
+          # respawning -- otherwise the new `openchamber` process would
+          # fail to bind the port and self-heal would be a no-op that just
+          # looked like it worked.
+          check_health() {
+            curl -fsS --max-time 5 "http://127.0.0.1:3000/health" >/dev/null 2>&1
+          }
+
           echo "------------------------------------------"
           echo "SERVER LIVE AT: ${{ env.URL }}"
           echo "AUTO-SHUTDOWN IN: ${{ github.event.inputs.timeout_minutes }} minute(s)"
@@ -276,6 +312,7 @@ jobs:
 
           START_TIME=$(date +%s)
           TIMEOUT_SECONDS=$(( ${{ github.event.inputs.timeout_minutes }} * 60 ))
+          UNHEALTHY_STREAK=0
 
           while true; do
             ELAPSED=$(( $(date +%s) - START_TIME ))
@@ -291,10 +328,23 @@ jobs:
               echo "[$(date)] Time remaining: $(( REMAINING / 60 )) minutes"
             fi
 
-            if ! lsof -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-              echo "[$(date)] Restoring OpenChamber..."
-              nohup stdbuf -oL openchamber --port 3000 >> openchamber.log 2>&1 &
-              sleep 10
+            if check_health; then
+              UNHEALTHY_STREAK=0
+            else
+              UNHEALTHY_STREAK=$(( UNHEALTHY_STREAK + 1 ))
+              echo "[$(date)] Health check failed (streak: $UNHEALTHY_STREAK)"
+
+              # Require 2 consecutive failed checks (~10s apart) before
+              # restarting, so a single transient blip doesn't kill a
+              # perfectly good long-running request.
+              if [ "$UNHEALTHY_STREAK" -ge 2 ]; then
+                echo "[$(date)] OpenChamber unresponsive -- restarting..."
+                pkill -f "openchamber --port 3000" 2>/dev/null || true
+                sleep 2
+                nohup stdbuf -oL openchamber --port 3000 >> openchamber.log 2>&1 &
+                sleep 10
+                UNHEALTHY_STREAK=0
+              fi
             fi
 
             if [[ "${{ github.event.inputs.tunnel_provider }}" == "ngrok" ]]; then
