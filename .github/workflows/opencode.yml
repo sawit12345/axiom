@@ -186,9 +186,37 @@ jobs:
 
       - name: Install Tools
         run: |
-          npm install -g opencode-ai @openchamber/web
           sudo apt update
           sudo apt install -y jq lsof coreutils curl wget
+
+          # CHANGED: opencode-ai and @openchamber/web release independently
+          # and opencode-ai ships new versions many times a day. Installing
+          # both at their own "latest" tag risks a client/server protocol
+          # mismatch: @openchamber/web bundles a specific, EXACT-pinned
+          # @opencode-ai/sdk version (its client), while a freshly
+          # `npm install -g opencode-ai@latest` can already be newer than
+          # that by the time this job runs. That mismatch can silently
+          # break the generic multi-provider streaming path (hangs / empty
+          # responses) while OpenChamber's own hardcoded Zen fallback still
+          # works, since it doesn't exercise the same code path.
+          #
+          # Fix: install OpenChamber first, read the exact SDK version its
+          # package.json declares, and pin the opencode-ai server to match.
+          npm install -g @openchamber/web
+
+          OPENCODE_SDK_VERSION=$(npm view @openchamber/web dependencies --json 2>/dev/null | jq -r '."@opencode-ai/sdk" // empty')
+
+          if [ -n "$OPENCODE_SDK_VERSION" ]; then
+            echo "OpenChamber was built against @opencode-ai/sdk@${OPENCODE_SDK_VERSION} -- pinning opencode-ai to match"
+            npm install -g "opencode-ai@${OPENCODE_SDK_VERSION}"
+          else
+            echo "Could not read pinned SDK version from @openchamber/web's package.json -- falling back to opencode-ai@latest (may drift)"
+            npm install -g opencode-ai
+          fi
+
+          echo "=== Installed versions (record this for debugging) ==="
+          opencode --version 2>&1 || true
+          openchamber --version 2>&1 || true
 
           if [[ "${{ github.event.inputs.tunnel_provider }}" == "cloudflare" ]]; then
             wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
